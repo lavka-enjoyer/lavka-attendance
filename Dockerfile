@@ -19,7 +19,7 @@ ENV VITE_API_URL=$VITE_API_URL \
 
 RUN NODE_OPTIONS="--max-old-space-size=512" npm run build
 
-FROM python:3.12-slim
+FROM python:3.14-slim
 
 WORKDIR /app
 

@@ -1,4 +1,4 @@
-FROM node:20-slim AS frontend
+FROM node:25-slim AS frontend
 
 WORKDIR /app/frontend
 COPY telegram-mini-app/package.json telegram-mini-app/package-lock.json* ./

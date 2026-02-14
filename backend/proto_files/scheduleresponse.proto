@@ -1,0 +1,80 @@
+syntax = "proto3";
+
+package timetable;
+
+import "google/protobuf/timestamp.proto";
+
+// Верхний уровень: судя по decode_raw, поле №2 повторяется — это и есть элементы результата.
+message Response {
+  repeated Item items = 2;
+}
+
+// Один элемент расписания. Поле 1 — «сырой» блок, поле 3 — «нормализованный/обогащённый», поле 2 — флаг/статус (varint = 1).
+message Item {
+  Raw        raw        = 1;
+  int32      kind       = 2; // предположительно enum/флаг, в примерах = 1
+  Enriched   enriched   = 3;
+}
+
+// «Сырые» данные
+message Raw {
+  string                 id            = 1;  // например, "01993fba-..."
+  Location               location      = 2;  // здание/аудитория/корпус
+  string                 title         = 3;  // полное название дисциплины
+  string                 lesson_short  = 4;  // кратко: "ПР"
+  google.protobuf.Timestamp start      = 5;  // начало
+  google.protobuf.Timestamp end        = 6;  // конец
+  Person                 teacher       = 9;  // преподаватель (ФИО)
+  string                 discipline_id = 13; // UUID дисциплины
+  TimestampHolder        updated       = 18; // обёртка с Timestamp (см. ниже)
+}
+
+// «Обогащённые» данные (повторяют те же сущности, но в виде отдельных объектов с id + названиями)
+message Enriched {
+  string                 id            = 1;
+  google.protobuf.Timestamp start      = 2;
+  google.protobuf.Timestamp end        = 3;
+
+  Discipline             discipline    = 4;  // id + название дисциплины
+  LessonType             lesson_type   = 5;  // id + краткое имя ("ПР")
+  Location               location      = 6;
+  Person                 teacher       = 7;
+  TimestampHolder        updated       = 8;
+}
+
+// Аудитория/локация
+message Location {
+  string building_id = 1; // UUID здания
+  string room        = 2; // номер аудитории, напр. "349"
+  string corpus      = 3; // корпус, напр. "С-20"
+}
+
+// Преподаватель
+message Person {
+  string id         = 1; // UUID
+  string first_name = 2; // "Наталья"
+  string last_name  = 3; // "Мандрик"
+  PersonExtra extra = 4; // patronymic внутри поля 1
+}
+
+message PersonExtra {
+  string patronymic = 1; // "Викторовна"
+}
+
+// Дисциплина (в Enriched.4)
+message Discipline {
+  string id    = 1;
+  string title = 2; // полное название
+}
+
+// Тип занятия (в Enriched.5)
+message LessonType {
+  string id        = 1;
+  string shortname = 2; // "ПР"
+}
+
+// В сообщении были конструкции вида: 18 { 1 { 1: seconds 2: nanos } }
+// То есть поле содержит обёртку, у которой внутри под полем 1 — Timestamp.
+message TimestampHolder {
+  google.protobuf.Timestamp value = 1;
+}

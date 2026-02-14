@@ -1,0 +1,33 @@
+venv
+.venv
+test.py
+cookies.json
+__pycache__/
+*.pyc
+.env
+.idea
+user_actions.log
+doc.md
+loggin_refferal.txt
+loggin_user_create.txt
+
+backend/proxy_info.json
+
+telegram-mini-app/vite.config.js
+node_modules
+
+# Тестовые и временные файлы (кроме tests/)
+/test_*.py
+!/tests/test_*.py
+example_*.py
+example_*.html
+
+# Скрипты деплоя (содержат конфиги)
+deploy.sh
+update.sh
+
+# Документация деплоя (может содержать чувствительную информацию)
+README_DEPLOY.md
+
+# OMC (oh-my-claudecode) локальное состояние
+.omc/

@@ -1,0 +1,11 @@
+syntax = "proto3";
+
+message Date {
+  int32 year = 1;  // 2025
+  int32 month = 2; // 10
+  int32 day = 3;   // 14
+}
+
+message Request {
+  Date date = 2;  // соответствует "2" в JSON
+}

@@ -1,0 +1,73 @@
+version: '3.8'
+
+services:
+  postgres:
+    image: postgres:15
+    container_name: mireapprove-postgres-new
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-mydb2}
+      POSTGRES_USER: ${POSTGRES_USER:-myuser}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - postgres_data_new:/var/lib/postgresql/data
+    # ports:
+    #   - "5432:5432"  # Закомментировано для безопасности. Раскомментируйте для локальной отладки.
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U myuser -d mydb2"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: mireapprove-redis
+    command: redis-server --appendonly yes
+    volumes:
+      - redis_data:/data
+    # ports:
+    #   - "6379:6379"  # Закомментировано для безопасности. Раскомментируйте для локальной отладки.
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        VITE_API_URL: ${VITE_API_URL:-}
+        VITE_SUPPORT_USERNAME: ${SUPPORT_USERNAME:-}
+        VITE_NEWS_CHANNEL_URL: ${NEWS_CHANNEL_URL:-}
+        VITE_BOT_USERNAME: ${BOT_USERNAME:-}
+        VITE_DEMO_MODE: ${VITE_DEMO_MODE:-false}
+    image: mireapprove:latest
+    container_name: mireapprove-app-new
+    environment:
+      - DSN=${DSN}
+      - ENCRYPTION_KEY=${ENCRYPTION_KEY}
+      - BOT_TOKEN=${BOT_TOKEN}
+      - BOT_USERNAME=${BOT_USERNAME}
+      - SUPER_ADMIN=${SUPER_ADMIN}
+      - TRUSTED_SERVICE_API_KEY=${TRUSTED_SERVICE_API_KEY}
+      - WEBAPP_URL=${WEBAPP_URL:-}
+      - NEWS_CHANNEL_URL=${NEWS_CHANNEL_URL:-}
+      - DONATE_URL=${DONATE_URL:-}
+      - SUPPORT_USERNAME=${SUPPORT_USERNAME:-}
+      - DONATE_BOT_USERNAME=${DONATE_BOT_USERNAME:-}
+      - REDIS_URL=redis://redis:6379/0
+    ports:
+      - "8001:8001"
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+volumes:
+  postgres_data_new:
+  redis_data:

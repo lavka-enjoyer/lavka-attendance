@@ -1,0 +1,47 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master, develop]
+  pull_request:
+    branches: [main, master]
+
+permissions:
+  contents: read
+
+jobs:
+  docker:
+    name: "🐳 Сборка Docker"
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: "🔨 Сборка Docker образа"
+        id: docker-build
+        run: |
+          set -o pipefail
+          echo "## 🐳 Сборка Docker образа" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          if docker build -t mireapprove:test . 2>&1 | tee docker_output.txt; then
+            echo "✅ **Docker образ успешно собран!**" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            docker images mireapprove:test --format "table {{.Repository}}\t{{.Tag}}\t{{.Size}}" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "❌ **Ошибка сборки Docker образа!**" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "### Лог ошибки:" >> $GITHUB_STEP_SUMMARY
+            echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+            tail -30 docker_output.txt >> $GITHUB_STEP_SUMMARY
+            echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "### 💡 Как исправить:" >> $GITHUB_STEP_SUMMARY
+            echo "1. Соберите образ локально: \`docker build -t mireapprove:test .\`" >> $GITHUB_STEP_SUMMARY
+            echo "2. Проверьте Dockerfile на синтаксические ошибки" >> $GITHUB_STEP_SUMMARY
+            echo "3. Убедитесь что все зависимости доступны" >> $GITHUB_STEP_SUMMARY
+            exit 1
+          fi
+
+      - name: "✅ Проверка Docker образа"
+        run: docker images mireapprove:test
+

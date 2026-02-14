@@ -1,0 +1,89 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    /* Основные цвета из Telegram WebApp */
+    --tg-theme-bg-color: #ffffff;
+    --tg-theme-text-color: #000000;
+    --tg-theme-hint-color: #999999;
+    --tg-theme-link-color: #2481cc;
+    --tg-theme-button-color: #2481cc;
+    --tg-theme-button-text-color: #ffffff;
+    --tg-theme-secondary-bg-color: #f0f0f0;
+
+    /* Адаптируем переменные shadcn под тему Telegram */
+    --background: var(--tg-theme-bg-color);
+    --foreground: var(--tg-theme-text-color);
+    --card: var(--tg-theme-bg-color);
+    --card-foreground: var(--tg-theme-text-color);
+    --popover: var(--tg-theme-bg-color);
+    --popover-foreground: var(--tg-theme-text-color);
+    --primary: var(--tg-theme-button-color);
+    --primary-foreground: var(--tg-theme-button-text-color);
+    --secondary: var(--tg-theme-secondary-bg-color);
+    --secondary-foreground: var(--tg-theme-text-color);
+    --muted: var(--tg-theme-secondary-bg-color);
+    --muted-foreground: var(--tg-theme-hint-color);
+    --accent: var(--tg-theme-secondary-bg-color);
+    --accent-foreground: var(--tg-theme-text-color);
+    --destructive: #ff3b30;
+    --destructive-foreground: #ffffff;
+    --border: var(--tg-theme-hint-color);
+    --input: var(--tg-theme-secondary-bg-color);
+    --ring: var(--tg-theme-button-color);
+    --radius: 0.75rem;
+  }
+
+  * {
+    @apply border-border;
+    -webkit-tap-highlight-color: transparent !important;
+    -webkit-touch-callout: none !important;
+    tap-highlight-color: transparent !important;
+  }
+
+  a, button, input, select, textarea, [role="button"], [onclick], label {
+    -webkit-tap-highlight-color: transparent !important;
+    -webkit-touch-callout: none !important;
+    tap-highlight-color: transparent !important;
+    outline: none !important;
+  }
+
+  /* Disable user selection highlight on interactive elements */
+  button, [role="button"] {
+    -webkit-user-select: none !important;
+    user-select: none !important;
+  }
+  
+  body {
+    @apply bg-background text-foreground antialiased;
+    font-feature-settings: "rlig" 1, "calt" 1;
+  }
+}
+
+@layer utilities {
+  .glass {
+    @apply backdrop-blur-md shadow-md;
+    background-color: var(--tg-theme-secondary-bg-color, #f0f0f0);
+    background-color: color-mix(in srgb, var(--tg-theme-secondary-bg-color, #f0f0f0), transparent 10%);
+    border: 1px solid var(--tg-theme-text-color, #000000);
+    border-color: color-mix(in srgb, var(--tg-theme-text-color, #000000), transparent 85%);
+  }
+  
+  .glass-dark {
+    @apply backdrop-blur-md shadow-md;
+    background-color: #000000;
+    background-color: color-mix(in srgb, #000000, transparent 20%);
+    border: 1px solid rgba(255, 255, 255, 0.15);
+  }
+
+  .no-scrollbar::-webkit-scrollbar {
+    display: none;
+  }
+
+  .no-scrollbar {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+}

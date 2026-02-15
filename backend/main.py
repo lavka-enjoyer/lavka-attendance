@@ -77,7 +77,7 @@ async def lifespan(app: FastAPI):
             from backend.utils_helper import TELEGRAM_API_URL
 
             webhook_url = f"{WEBAPP_URL.rstrip('/')}/api/telegram-webhook"
-            webhook_data = {"url": webhook_url, "allowed_updates": ["message"]}
+            webhook_data = {"url": webhook_url, "allowed_updates": ["message", "callback_query"]}
             if TELEGRAM_WEBHOOK_SECRET:
                 webhook_data["secret_token"] = TELEGRAM_WEBHOOK_SECRET
             resp = req.post(

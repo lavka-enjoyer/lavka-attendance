@@ -308,10 +308,26 @@ async def get_credentials(
                 detail="User credentials not found. Please set up login and password first",
             )
 
-        # Шифруем credentials токеном запрашивающего
+        # Получаем TOTP секрет и credential_id для авто-2FA
+        target_id = target_tg_userid if (target_tg_userid and target_tg_userid != requester_tg_userid) else requester_tg_userid
+        totp_secret = await db.get_totp_secret(target_id)
+        totp_credential_id = await db.get_totp_credential_id(target_id)
+
+        # Получаем сохранённые cookies
+        cookie_record = await db.get_cookie(target_id)
+        stored_cookies = cookie_record.get("cookies") if cookie_record else None
+
+        # Шифруем credentials + TOTP + cookies токеном запрашивающего
+        payload = {
+            "l": user["login"],
+            "p": user["hashed_password"],
+            "ts": totp_secret,
+            "tc": totp_credential_id,
+            "sc": stored_cookies,
+        }
         fernet = Fernet(_derive_fernet_key(token))
         encrypted_data = fernet.encrypt(
-            json.dumps({"l": user["login"], "p": user["hashed_password"]}).encode()
+            json.dumps(payload).encode()
         ).decode()
 
         return CredentialsResponse(

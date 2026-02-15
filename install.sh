@@ -981,7 +981,7 @@ setup_auto_update() {
     print_info "Настройка автообновления..."
 
     # Создаём скрипт обновления
-    cat > "$PROJECT_DIR/update.sh" << 'EOF'
+    cat > "$PROJECT_DIR/update.sh" << 'UPDATEEOF'
 #!/bin/bash
 
 # MireApprove Auto-Update Script
@@ -1009,15 +1009,24 @@ fi
 
 log "Найдено обновление: ${LOCAL:0:7} -> ${REMOTE:0:7}"
 
-# Сохраняем .env
+# Сохраняем файлы которые могут быть изменены локально
 cp .env .env.backup
 
-# Получаем обновления
+# Сохраняем модифицированный порт из docker-compose.yml
+APP_PORT=$(grep -oP '"\K[0-9]+(?=:8001")' docker-compose.yml 2>/dev/null || echo "8001")
+
+# Жёсткое обновление (гарантирует чистый pull без конфликтов)
 log "Загрузка обновлений..."
-git pull origin main
+git reset --hard origin/main
 
 # Восстанавливаем .env
 mv .env.backup .env
+
+# Восстанавливаем порт если он был изменён
+if [ "$APP_PORT" != "8001" ]; then
+    sed -i "s/8001:8001/$APP_PORT:8001/g" docker-compose.yml
+    log "Порт $APP_PORT восстановлен в docker-compose.yml"
+fi
 
 # Пересобираем контейнеры
 log "Пересборка контейнеров..."
@@ -1028,7 +1037,7 @@ log "Перезапуск приложения..."
 docker compose up -d
 
 log "Обновление завершено успешно"
-EOF
+UPDATEEOF
 
     chmod +x "$PROJECT_DIR/update.sh"
 

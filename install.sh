@@ -22,6 +22,7 @@ PROJECT_DIR="/opt/mireapprove"
 LOG_DIR="/var/log/mireapprove"
 INSTALL_LOG="$LOG_DIR/install.log"
 UPDATE_LOG="$LOG_DIR/update.log"
+STATE_FILE="/opt/mireapprove/.install-state"
 VERSION="1.0.0"
 
 # ===== ЦВЕТА =====
@@ -48,6 +49,7 @@ ENCRYPTION_KEY=""
 SERVER_IP=""
 NEWS_CHANNEL_URL=""
 DONATE_URL=""
+CURRENT_STEP=0
 
 # ===== UI ФУНКЦИИ =====
 
@@ -175,6 +177,58 @@ ask_yes_no() {
 log() {
     echo "[$(date '+%Y-%m-%d %H:%M:%S')] $1" >> "$INSTALL_LOG"
 }
+
+# ===== СОХРАНЕНИЕ/ВОССТАНОВЛЕНИЕ ПРОГРЕССА =====
+
+save_state() {
+    local step=$1
+    mkdir -p "$(dirname "$STATE_FILE")"
+    cat > "$STATE_FILE" << EOF
+INSTALL_STEP=$step
+DOMAIN="$DOMAIN"
+BOT_TOKEN="$BOT_TOKEN"
+BOT_USERNAME="$BOT_USERNAME"
+SUPER_ADMIN="$SUPER_ADMIN"
+APP_PORT="$APP_PORT"
+POSTGRES_PASSWORD="$POSTGRES_PASSWORD"
+ENCRYPTION_KEY="$ENCRYPTION_KEY"
+NEWS_CHANNEL_URL="$NEWS_CHANNEL_URL"
+DONATE_URL="$DONATE_URL"
+SERVER_IP="$SERVER_IP"
+EOF
+    log "State saved at step $step"
+}
+
+load_state() {
+    if [ -f "$STATE_FILE" ]; then
+        source "$STATE_FILE"
+        log "State loaded from step $INSTALL_STEP"
+        return 0
+    fi
+    return 1
+}
+
+delete_state() {
+    rm -f "$STATE_FILE"
+    log "State file deleted"
+}
+
+# Автосохранение при потере соединения (SSH disconnect, Ctrl+C, kill)
+on_interrupt() {
+    echo ""
+    if [ $CURRENT_STEP -ge 4 ] && [ -n "$DOMAIN" ]; then
+        save_state $CURRENT_STEP
+        echo -e "\n${YELLOW}  Установка прервана. Прогресс сохранён (шаг $CURRENT_STEP из 7).${NC}"
+        echo -e "${YELLOW}  Запустите скрипт заново чтобы продолжить.${NC}\n"
+        log "Installation interrupted at step $CURRENT_STEP, state saved"
+    else
+        echo -e "\n${YELLOW}  Установка прервана.${NC}\n"
+        log "Installation interrupted at step $CURRENT_STEP (no state to save)"
+    fi
+    exit 1
+}
+
+trap on_interrupt SIGHUP SIGINT SIGTERM SIGPIPE
 
 # ===== ПРОВЕРКИ СИСТЕМЫ =====
 
@@ -471,17 +525,15 @@ show_dns_instructions() {
     echo -e "  ${WHITE}└──────────┴──────────────────────────┴──────────────────────────┘${NC}"
     echo ""
     echo -e "  ${DIM}Если домен уже указывает на этот сервер, просто нажмите Enter.${NC}"
-    echo -e "  ${DIM}DNS записи обычно применяются за 5-10 минут.${NC}"
+    echo -e "  ${DIM}DNS записи обычно применяются за 5-10 минут, но могут занять до нескольких часов.${NC}"
+    echo -e "  ${DIM}Если DNS ещё не применился, вы сможете сохранить прогресс и продолжить позже.${NC}"
     echo ""
 }
 
 wait_for_dns() {
     print_info "Проверка DNS..."
 
-    local max_attempts=3
-    local attempt=1
-
-    while [ $attempt -le $max_attempts ]; do
+    while true; do
         local domain_ip=$(dig +short "$DOMAIN" 2>/dev/null | tail -1)
 
         if [ "$domain_ip" = "$SERVER_IP" ]; then
@@ -489,25 +541,44 @@ wait_for_dns() {
             return 0
         fi
 
-        if [ $attempt -lt $max_attempts ]; then
-            echo ""
-            echo -e "  ${YELLOW}DNS пока не применился${NC}"
-            echo -e "  IP сервера:  ${GREEN}$SERVER_IP${NC}"
-            echo -e "  IP домена:   ${RED}${domain_ip:-не найден}${NC}"
-            echo ""
+        echo ""
+        echo -e "  ${YELLOW}DNS пока не применился${NC}"
+        echo -e "  IP сервера:  ${GREEN}$SERVER_IP${NC}"
+        echo -e "  IP домена:   ${RED}${domain_ip:-не найден}${NC}"
+        echo ""
+        echo -e "  ${DIM}DNS записи могут применяться от 5 минут до нескольких часов.${NC}"
+        echo ""
 
-            if ask_yes_no "Повторить проверку?" "y"; then
-                ((attempt++))
+        echo -e "  Варианты:"
+        echo -e "  ${WHITE}[1]${NC} Повторить проверку"
+        echo -e "  ${WHITE}[2]${NC} Продолжить без проверки (SSL может не сработать)"
+        echo -e "  ${WHITE}[3]${NC} Выйти и продолжить позже (прогресс сохранён)"
+        echo ""
+
+        read -p "  Выберите (1-3): " choice
+
+        case "$choice" in
+            1)
                 echo -e "  ${DIM}Ожидание 10 секунд...${NC}"
                 sleep 10
-            else
+                ;;
+            2)
                 print_warning "Продолжаем без проверки DNS. SSL может не сработать!"
                 return 0
-            fi
-        else
-            print_warning "DNS проверка не пройдена, но продолжаем установку"
-            return 0
-        fi
+                ;;
+            3)
+                save_state 4
+                echo ""
+                print_info "Прогресс сохранён. Для продолжения установки запустите скрипт заново."
+                echo -e "  ${DIM}Когда DNS записи применятся, просто запустите этот скрипт ещё раз.${NC}"
+                echo ""
+                exit 0
+                ;;
+            *)
+                echo -e "  ${DIM}Ожидание 10 секунд...${NC}"
+                sleep 10
+                ;;
+        esac
     done
 }
 
@@ -651,7 +722,7 @@ obtain_ssl_certificate() {
         echo ""
 
         echo -e "  Возможные причины:"
-        echo -e "  ${DIM}• DNS записи ещё не применились (может занять от 5 минут до 48 часов)${NC}"
+        echo -e "  ${DIM}• DNS записи ещё не применились (может занять от 5 минут до нескольких часов)${NC}"
         echo -e "  ${DIM}• Порт 80 заблокирован файрволом${NC}"
         echo -e "  ${DIM}• Домен указывает на другой IP${NC}"
         echo ""
@@ -661,7 +732,7 @@ obtain_ssl_certificate() {
 
         echo -e "  Варианты:"
         echo -e "  ${WHITE}[1]${NC} Повторить попытку"
-        echo -e "  ${WHITE}[2]${NC} Выйти и попробовать позже"
+        echo -e "  ${WHITE}[2]${NC} Выйти и продолжить позже (прогресс сохранён)"
         echo ""
 
         read -p "  Выберите (1-2): " choice
@@ -672,11 +743,18 @@ obtain_ssl_certificate() {
                 echo -e "  ${DIM}Ожидание 30 секунд перед повторной попыткой...${NC}"
                 sleep 30
                 ;;
-            2|*)
+            2)
+                save_state 4
                 echo ""
-                print_error "Установка прервана"
-                echo -e "  ${YELLOW}Убедитесь что DNS записи настроены правильно и повторите установку.${NC}"
-                exit 1
+                print_info "Прогресс сохранён. Для продолжения установки запустите скрипт заново."
+                echo -e "  ${DIM}Убедитесь что DNS записи настроены правильно перед повторным запуском.${NC}"
+                echo ""
+                exit 0
+                ;;
+            *)
+                ((attempt++))
+                echo -e "  ${DIM}Ожидание 30 секунд перед повторной попыткой...${NC}"
+                sleep 30
                 ;;
         esac
     done
@@ -1111,16 +1189,52 @@ main() {
     # Выводим логотип
     print_logo
 
-    echo -e "  ${DIM}Добро пожаловать в установщик MireApprove!${NC}"
-    echo -e "  ${DIM}Этот скрипт автоматически настроит всё необходимое.${NC}"
-    echo ""
+    # Проверяем наличие сохранённого прогресса
+    local resume_step=0
 
-    if ! ask_yes_no "Начать установку?" "y"; then
-        echo -e "\n  ${YELLOW}Установка отменена${NC}\n"
-        exit 0
+    if [ -f "$STATE_FILE" ]; then
+        load_state
+        echo ""
+        print_box "НАЙДЕНА ПРЕДЫДУЩАЯ УСТАНОВКА" "🔄"
+        echo -e "  Домен:  ${CYAN}$DOMAIN${NC}"
+        echo -e "  Бот:    ${CYAN}@$BOT_USERNAME${NC}"
+        echo -e "  Шаг:    ${CYAN}$INSTALL_STEP из 7${NC}"
+        echo ""
+
+        echo -e "  Варианты:"
+        echo -e "  ${WHITE}[1]${NC} Продолжить установку"
+        echo -e "  ${WHITE}[2]${NC} Начать заново"
+        echo ""
+
+        read -p "  Выберите (1-2): " resume_choice
+
+        case "$resume_choice" in
+            1)
+                resume_step=$INSTALL_STEP
+                print_success "Продолжаем с шага $resume_step"
+                log "Resuming from step $resume_step"
+                ;;
+            2|*)
+                delete_state
+                resume_step=0
+                print_info "Начинаем установку заново"
+                log "Fresh install requested"
+                ;;
+        esac
+    else
+        echo -e "  ${DIM}Добро пожаловать в установщик MireApprove!${NC}"
+        echo -e "  ${DIM}Этот скрипт автоматически настроит всё необходимое.${NC}"
+        echo ""
+
+        if ! ask_yes_no "Начать установку?" "y"; then
+            echo -e "\n  ${YELLOW}Установка отменена${NC}\n"
+            exit 0
+        fi
     fi
 
     # ===== ШАГ 1: Проверка системы =====
+    # Шаги 1-2 быстрые и безопасные, всегда выполняются
+    CURRENT_STEP=1
     print_step 1 7 "ПРОВЕРКА СИСТЕМЫ"
 
     check_root
@@ -1133,6 +1247,7 @@ main() {
     log "System check passed"
 
     # ===== ШАГ 2: Установка зависимостей =====
+    CURRENT_STEP=2
     print_step 2 7 "УСТАНОВКА ЗАВИСИМОСТЕЙ"
 
     install_packages
@@ -1141,54 +1256,88 @@ main() {
     log "Dependencies installed"
 
     # ===== ШАГ 3: Конфигурация =====
-    print_step 3 7 "НАСТРОЙКА КОНФИГУРАЦИИ"
+    if [ $resume_step -lt 4 ]; then
+        CURRENT_STEP=3
+        print_step 3 7 "НАСТРОЙКА КОНФИГУРАЦИИ"
 
-    configure_domain
-    show_dns_instructions
+        configure_domain
+        show_dns_instructions
 
-    echo -e "  ${WHITE}Нажмите Enter после настройки DNS записей...${NC}"
-    read
+        echo -e "  ${WHITE}Нажмите Enter после настройки DNS записей...${NC}"
+        read
 
-    wait_for_dns
-    configure_telegram
-    configure_admin
-    configure_optional
+        wait_for_dns
+        configure_telegram
+        configure_admin
+        configure_optional
 
-    # Генерируем секреты
-    generate_postgres_password
-    generate_encryption_key
+        # Генерируем секреты
+        generate_postgres_password
+        generate_encryption_key
 
-    # Проверяем порт
-    handle_port_conflict
+        # Проверяем порт
+        handle_port_conflict
 
-    log "Configuration completed"
+        log "Configuration completed"
+        CURRENT_STEP=4
+        save_state 4
+    else
+        print_step 3 7 "НАСТРОЙКА КОНФИГУРАЦИИ"
+        print_success "Конфигурация загружена из сохранённого прогресса"
+        CURRENT_STEP=$resume_step
+    fi
 
     # ===== ШАГ 4: SSL сертификат =====
-    print_step 4 7 "ПОЛУЧЕНИЕ SSL СЕРТИФИКАТА"
+    if [ $resume_step -lt 5 ]; then
+        CURRENT_STEP=4
+        print_step 4 7 "ПОЛУЧЕНИЕ SSL СЕРТИФИКАТА"
 
-    obtain_ssl_certificate
+        obtain_ssl_certificate
 
-    log "SSL certificate obtained"
+        log "SSL certificate obtained"
+        CURRENT_STEP=5
+        save_state 5
+    else
+        print_step 4 7 "ПОЛУЧЕНИЕ SSL СЕРТИФИКАТА"
+        print_success "SSL сертификат уже получен"
+    fi
 
     # ===== ШАГ 5: Nginx =====
-    print_step 5 7 "НАСТРОЙКА NGINX"
+    if [ $resume_step -lt 6 ]; then
+        CURRENT_STEP=5
+        print_step 5 7 "НАСТРОЙКА NGINX"
 
-    configure_nginx
+        configure_nginx
 
-    log "Nginx configured"
+        log "Nginx configured"
+        CURRENT_STEP=6
+        save_state 6
+    else
+        print_step 5 7 "НАСТРОЙКА NGINX"
+        print_success "Nginx уже настроен"
+    fi
 
     # ===== ШАГ 6: Установка приложения =====
-    print_step 6 7 "УСТАНОВКА ПРИЛОЖЕНИЯ"
+    if [ $resume_step -lt 7 ]; then
+        CURRENT_STEP=6
+        print_step 6 7 "УСТАНОВКА ПРИЛОЖЕНИЯ"
 
-    clone_repository
-    create_env_file
-    update_docker_compose_port
-    setup_auto_update
-    create_systemd_service
+        clone_repository
+        create_env_file
+        update_docker_compose_port
+        setup_auto_update
+        create_systemd_service
 
-    log "Application installed"
+        log "Application installed"
+        CURRENT_STEP=7
+        save_state 7
+    else
+        print_step 6 7 "УСТАНОВКА ПРИЛОЖЕНИЯ"
+        print_success "Приложение уже установлено"
+    fi
 
     # ===== ШАГ 7: Запуск =====
+    CURRENT_STEP=7
     print_step 7 7 "ЗАПУСК ПРИЛОЖЕНИЯ"
 
     start_application
@@ -1196,6 +1345,9 @@ main() {
     log "Application started"
 
     # ===== Завершение =====
+    # Отключаем trap — установка завершена успешно
+    trap - SIGHUP SIGINT SIGTERM SIGPIPE
+    delete_state
     print_completion
 }
 

@@ -196,3 +196,4 @@ curl -H "Authorization: Bearer <token>" http://localhost:8001/api/v1/user/info
 ## Лицензия
 
 [MIT License](LICENSE)
+

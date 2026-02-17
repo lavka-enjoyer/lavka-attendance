@@ -56,8 +56,24 @@ def parse_me_info(message: Dict[str, Any]) -> Dict[str, Any]:
     # get_nested автоматически обрабатывает альтернативные ключи blackboxprotobuf (1-1, 1-2, ...)
     user_info = get_nested(message, "1", "1", default={})
 
+    # Если стандартный путь не нашёл данные, пробуем альтернативные пути —
+    # API MIREA мог изменить структуру ответа
     if not user_info:
-        logger.warning(f"Не удалось найти информацию о пользователе. Ключи: {list(message.keys())}")
+        # Вариант: данные перемещены в message["2"]["1"] или message["2"]
+        for alt_path in [("2", "1"), ("2",), ("1",)]:
+            user_info = get_nested(message, *alt_path, default={})
+            if user_info and isinstance(user_info, dict) and ("2" in user_info or "3" in user_info):
+                logger.info(f"Найдена информация о пользователе по альтернативному пути: {alt_path}")
+                break
+        else:
+            user_info = {}
+
+    if not user_info:
+        logger.warning(
+            f"Не удалось найти информацию о пользователе. "
+            f"Ключи: {list(message.keys())}, Содержимое (первые 500 символов): "
+            f"{str(message)[:500]}"
+        )
         return result
 
     # UUID пользователя

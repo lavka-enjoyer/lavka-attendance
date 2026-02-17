@@ -81,6 +81,20 @@ async def _check_user(db: DBModel, tg_user_id: int) -> CheckUserResult:
 
     except Exception as ex:
         logger.error(f"Error checking user {tg_user_id}: {ex}", exc_info=True)
+
+        # Если get_us_info упал, но у пользователя есть логин и группа в БД —
+        # используем данные из БД как fallback, чтобы приложение работало
+        try:
+            if info_from_db and info_from_db.get("login") and info_from_db.get("group_name"):
+                fio = (info_from_db.get("fio") or info_from_db.get("login") or "")
+                logger.info(
+                    f"get_us_info failed for user {tg_user_id}, "
+                    f"using DB fallback: fio={fio!r}, group={info_from_db.get('group_name')!r}"
+                )
+                return CheckUserSuccess(user_info=info_from_db, fio=fio, is_valid=True)
+        except Exception:
+            pass
+
         return CheckUserError(status_code=status.HTTP_404_NOT_FOUND, message=str(ex))
 
 

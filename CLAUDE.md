@@ -393,7 +393,7 @@ When adding new features, update documentation:
 
 Project wiki is located at: https://github.com/mixelka75/mireapprove/wiki
 
-Wiki repository is cloned to: `/home/mixelka/PycharmProjects/mireapprove-wiki`
+Wiki repository is cloned to: `/home/mixelka/Mirea/mireapprove-wiki`
 
 **When to update wiki:**
 - Changes to MIREA API integration (`/backend/mirea_api/`) — update `MIREA-API-Integration.md`
@@ -405,7 +405,7 @@ Wiki repository is cloned to: `/home/mixelka/PycharmProjects/mireapprove-wiki`
 
 **How to update wiki:**
 ```bash
-cd /home/mixelka/PycharmProjects/mireapprove-wiki
+cd /home/mixelka/Mirea/mireapprove-wiki
 # Edit relevant .md files
 git add -A && git commit -m "docs: update <section>" && git push
 ```
@@ -422,11 +422,8 @@ Wiki pages:
 
 ### Git Push Workflow
 
-При пуше изменений **всегда** синхронизировать оба репозитория:
-1. Пушить в `origin` (mixelka75/mireapprove)
-2. Скопировать изменённые файлы в `/tmp/lavka-attendance/`, закоммитить и пушить туда тоже (remote: `git@github-lavka:lavka-enjoyer/lavka-attendance.git`)
-
-Сервер тянет код из lavka-attendance, поэтому без пуша туда изменения не попадут на прод.
+Синхронизация в lavka-attendance происходит автоматически при пуше в main (через GitHub Actions CI).
+Достаточно пушить только в `origin` (mixelka75/mireapprove).
 
 ### Code Style
 

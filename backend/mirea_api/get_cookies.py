@@ -200,8 +200,84 @@ def _extract_email_code_form_url(page_text: str, current_url: str) -> Optional[s
     return None
 
 
+def _is_max_account_config_page(page_text: str) -> bool:
+    """Проверяет, является ли страница предложением привязать Max (required-action)."""
+    return (
+        '"login-max-otp"' in page_text
+        or "max-account-config" in page_text
+        or ('"showSkip"' in page_text and '"login-max-otp' in page_text)
+    )
+
+
+def _extract_skip_action_url(page_text: str, current_url: str) -> Optional[str]:
+    """Извлекает URL для пропуска required-action (кнопка Пропустить)."""
+    # Ищем loginAction в kcContext
+    login_action_match = re.search(r'"loginAction":\s*"([^"]*)"', page_text)
+    if login_action_match:
+        url = login_action_match.group(1).encode().decode("unicode-escape")
+        logger.info(f"Found skip action URL: {url}")
+        return url
+
+    # Fallback: ищем форму
+    soup = BeautifulSoup(page_text, "html.parser")
+    form = soup.find("form")
+    if form and form.get("action"):
+        action = form["action"].replace("&amp;", "&")
+        if not action.startswith("http"):
+            parsed = urlparse(current_url)
+            action = f"{parsed.scheme}://{parsed.netloc}{action}"
+        return action
+
+    return None
+
+
+async def _skip_required_action(
+    session: aiohttp.ClientSession,
+    skip_url: str,
+    user_agent: str,
+    tg_user_id: int = None,
+) -> Optional[str]:
+    """
+    Автоматически пропускает required-action (например, max-account-config).
+    Отправляет POST с skip=true.
+    Возвращает финальный URL после редиректа или None при ошибке.
+    """
+    logger.info(f"Пропуск required-action для пользователя {tg_user_id}: {skip_url}")
+
+    headers = {
+        "Content-Type": "application/x-www-form-urlencoded",
+        "User-Agent": user_agent,
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Accept-Language": "ru-RU,ru;q=0.8,en-US;q=0.5,en;q=0.3",
+    }
+
+    # Keycloak ожидает два поля skip и пустой retry
+    skip_data = aiohttp.FormData()
+    skip_data.add_field("skip", "Пропустить")
+    skip_data.add_field("skip", "true")
+    skip_data.add_field("retry", "")
+
+    async with session.post(
+        skip_url,
+        data=skip_data,
+        headers=headers,
+        allow_redirects=True,
+        timeout=aiohttp.ClientTimeout(total=15),
+    ) as response:
+        final_url = str(response.url)
+        response_text = await response.text()
+        logger.info(
+            f"Skip required-action ответ: статус={response.status}, URL={final_url}"
+        )
+        return final_url, response.status, response_text
+
+
 def _is_otp_page(page_text: str) -> bool:
     """Проверяет, является ли страница формой ввода OTP кода."""
+    # Сначала исключаем страницу max-account-config (она тоже содержит "totp")
+    if _is_max_account_config_page(page_text):
+        return False
+
     # Keycloak OTP страница содержит поле otp и специфичные маркеры
     return (
         '"otpLogin"' in page_text
@@ -427,6 +503,24 @@ async def get_cookies(
                             "Обнаружена страница email кода, но не удалось извлечь URL формы"
                         )
 
+                # Проверяем, не попали ли на страницу max-account-config (предложение привязать Max)
+                if post_response.status == 200 and _is_max_account_config_page(response_text):
+                    logger.info(
+                        f"Обнаружена страница max-account-config для пользователя {tg_user_id}, пропускаем"
+                    )
+                    skip_url = _extract_skip_action_url(response_text, final_redirect_url)
+                    if skip_url:
+                        final_redirect_url, skip_status, response_text = await _skip_required_action(
+                            session, skip_url, random_mobile_ua, tg_user_id
+                        )
+                        # После пропуска может быть ещё одна required-action или успех
+                        if _is_max_account_config_page(response_text):
+                            raise Exception("Не удалось пропустить настройку Max")
+                    else:
+                        raise Exception(
+                            "Обнаружена страница max-account-config, но не удалось извлечь URL для пропуска"
+                        )
+
                 # Проверяем, не требуется ли OTP
                 if post_response.status == 200 and _is_otp_page(response_text):
                     logger.info(
@@ -582,6 +676,32 @@ async def submit_email_code(
                     else:
                         raise Exception("Неверный email код")
 
+                # Проверяем, не попали ли на страницу max-account-config (предложение привязать Max)
+                if response.status == 200 and _is_max_account_config_page(response_text):
+                    logger.info(
+                        f"После email кода обнаружена страница max-account-config для {tg_user_id}, пропускаем"
+                    )
+                    skip_url = _extract_skip_action_url(response_text, final_url)
+                    if skip_url:
+                        final_url, skip_status, response_text = await _skip_required_action(
+                            session, skip_url, random_mobile_ua, tg_user_id
+                        )
+                        # После пропуска — проверяем результат
+                        if _is_max_account_config_page(response_text):
+                            raise Exception("Не удалось пропустить настройку Max")
+                        # Теперь извлекаем cookies — успешная авторизация
+                        cookies = _extract_cookies_list(session)
+                        logger.info(
+                            f"Email код + пропуск Max для пользователя {tg_user_id}! "
+                            f"Получено {len(cookies)} cookies"
+                        )
+                        return [cookies]
+                    else:
+                        raise Exception(
+                            "После email кода обнаружена страница max-account-config, "
+                            "но не удалось извлечь URL для пропуска"
+                        )
+
                 # Проверяем, не требуется ли теперь OTP (2FA)
                 if response.status == 200 and _is_otp_page(response_text):
                     logger.info(
@@ -725,6 +845,28 @@ async def submit_otp_code(
                         )
                     else:
                         raise Exception("Неверный OTP код")
+
+                # Проверяем, не попали ли на страницу max-account-config после OTP
+                if response.status == 200 and _is_max_account_config_page(response_text):
+                    logger.info(
+                        f"После OTP обнаружена страница max-account-config для {tg_user_id}, пропускаем"
+                    )
+                    skip_url = _extract_skip_action_url(response_text, final_url)
+                    if skip_url:
+                        final_url, skip_status, response_text = await _skip_required_action(
+                            session, skip_url, random_mobile_ua, tg_user_id
+                        )
+                        cookies = _extract_cookies_list(session)
+                        logger.info(
+                            f"2FA + пропуск Max для пользователя {tg_user_id}! "
+                            f"Получено {len(cookies)} cookies"
+                        )
+                        return [cookies]
+                    else:
+                        raise Exception(
+                            "После OTP обнаружена страница max-account-config, "
+                            "но не удалось извлечь URL для пропуска"
+                        )
 
                 # Проверяем успешный редирект (302 -> attendance-app)
                 if response.status == 200 or response.status == 302:

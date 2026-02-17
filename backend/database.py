@@ -144,9 +144,16 @@ class DBModel:
                     tg_userid BIGINT NULL,
                     status TEXT NOT NULL DEFAULT 'pending',
                     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-                    expires_at TIMESTAMP WITH TIME ZONE NOT NULL,
+                    expires_at TIMESTAMP WITH TIME ZONE NULL,
                     service_name TEXT NULL
                 );
+            """
+            )
+
+            # Разрешаем NULL для expires_at (бессрочные токены)
+            await conn.execute(
+                """
+                ALTER TABLE external_auth_tokens ALTER COLUMN expires_at DROP NOT NULL;
             """
             )
 

@@ -122,7 +122,7 @@ const MassMarkingProcess = ({ markingData, onContinue, initData }) => {
     // Poll status every 500ms
     pollingIntervalRef.current = setInterval(async () => {
       try {
-        const response = await fetch(`/api/get_marking_status/${sid}`);
+        const response = await fetch(`/api/get_marking_status/${sid}?initData=${encodeURIComponent(initData)}`);
         
         if (!response.ok) {
           throw new Error('Не удалось получить статус отметки');

@@ -167,6 +167,29 @@ async def _query_get_group(
         raise
 
 
+def _semester_sort_key(semester_name: str) -> tuple:
+    """
+    Возвращает ключ сортировки для названия семестра.
+    Формат: "Осень 25-26" или "Весна 25-26".
+    Осень старше Весны в одном учебном году (осень идёт первой).
+
+    Returns:
+        Кортеж (год_окончания, сезон) — чем больше, тем новее семестр.
+        Сезон: Осень=1, Весна=0 (осень новее при одинаковом годе)
+    """
+    if not semester_name:
+        return (0, 0)
+    try:
+        parts = semester_name.strip().split()
+        season = parts[0].lower() if parts else ""
+        years = parts[1] if len(parts) > 1 else "0-0"
+        end_year = int(years.split("-")[1]) if "-" in years else 0
+        season_order = 1 if "осень" in season else 0
+        return (end_year, season_order)
+    except Exception:
+        return (0, 0)
+
+
 async def get_group(
     cookies: list,
     tg_user_id: int,
@@ -176,6 +199,9 @@ async def get_group(
     """
     Получает данные с эндпоинта GetAvailableVisitingLogsOfStudent и
     извлекает из них все группы.
+
+    Группы сортируются по семестру — актуальная (из последнего семестра) идёт последней,
+    чтобы groups[0][-1] всегда возвращал текущую группу студента.
 
     Args:
         cookies: Список куки в виде словарей
@@ -190,17 +216,23 @@ async def get_group(
         message = await _query_get_group(cookies, tg_user_id, db, user_agent)
         logs = parse_visiting_logs(message)
 
-        # Извлекаем уникальные группы
+        # Сортируем логи по семестру от старого к новому
+        logs.sort(key=lambda log: _semester_sort_key(log.get("semester_name", "")))
+
+        # Извлекаем уникальные группы в порядке от старых к новым семестрам
+        # Так groups[-1] будет группой из актуального семестра
         groups = []
         seen = set()
         for log in logs:
             group_name = log.get("group_name", "")
-            if group_name and group_name not in seen:
-                # Проверяем что это действительно группа по паттерну
-                if GROUP_PATTERN.match(group_name):
-                    groups.append(group_name)
-                    seen.add(group_name)
+            if group_name and GROUP_PATTERN.match(group_name):
+                if group_name in seen:
+                    # Если группа уже есть — переставляем её в конец (более новый семестр)
+                    groups.remove(group_name)
+                groups.append(group_name)
+                seen.add(group_name)
 
+        logger.debug(f"Группы пользователя {tg_user_id} (от старых к новым): {groups}")
         return [groups]
     except Exception as e:
         raise e

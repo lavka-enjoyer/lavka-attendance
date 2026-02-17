@@ -533,23 +533,10 @@ async def submit_email_code(
                     f"Email код ответ: статус={response.status}, URL={final_url}"
                 )
 
-                # Если снова страница email кода — неверный код
-                if response.status == 200 and _is_email_code_page(response_text):
-                    logger.warning(
-                        f"Неверный email код для пользователя {tg_user_id}"
-                    )
-                    new_action_url = _extract_email_code_form_url(
-                        response_text, final_url
-                    )
-                    if new_action_url:
-                        new_session_cookies = _extract_session_cookies(session)
-                        return EmailCodeRequired(
-                            session_cookies=new_session_cookies,
-                            email_code_action_url=new_action_url,
-                            message="Неверный код. Попробуйте снова.",
-                        )
-                    else:
-                        raise Exception("Неверный email код")
+                # ВАЖНО: проверяем max-account-config ПЕРЕД email code page,
+                # т.к. страница max-account-config может содержать строки
+                # "email-authenticator" в kcContext, что ложно срабатывает
+                # на _is_email_code_page и вызывает бесконечный цикл.
 
                 # Проверяем, не попали ли на страницу max-account-config (предложение привязать Max)
                 if response.status == 200 and _is_max_account_config_page(response_text):
@@ -576,6 +563,24 @@ async def submit_email_code(
                             "После email кода обнаружена страница max-account-config, "
                             "но не удалось извлечь URL для пропуска"
                         )
+
+                # Если снова страница email кода — неверный код
+                if response.status == 200 and _is_email_code_page(response_text):
+                    logger.warning(
+                        f"Неверный email код для пользователя {tg_user_id}"
+                    )
+                    new_action_url = _extract_email_code_form_url(
+                        response_text, final_url
+                    )
+                    if new_action_url:
+                        new_session_cookies = _extract_session_cookies(session)
+                        return EmailCodeRequired(
+                            session_cookies=new_session_cookies,
+                            email_code_action_url=new_action_url,
+                            message="Неверный код. Попробуйте снова.",
+                        )
+                    else:
+                        raise Exception("Неверный email код")
 
                 # Успешный редирект (302 → attendance-app)
                 if response.status == 200 or response.status == 302:

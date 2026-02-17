@@ -188,16 +188,72 @@ async def complete_email_code_login(
     return []
 
 
-async def _check_existing_email_session(db: DBModel, tg_user_id: int, source: str = "refresh", notify: bool = False):
+# In-memory set для предотвращения race condition при параллельных запросах.
+# Если один запрос уже начал re-auth, другие не будут дублировать.
+_reauth_in_progress: set = set()
+
+
+async def _acquire_reauth_lock(
+    db: DBModel, tg_user_id: int, source: str = "refresh", notify: bool = False
+):
     """
-    Проверяет, есть ли уже активная email code сессия.
-    Если есть — сразу кидает EmailCodeRequiredError без повторного логина.
+    Атомарно проверяет и захватывает блокировку re-auth для пользователя.
+    Вызывающий ОБЯЗАН вызвать _release_reauth_lock() в finally-блоке.
+
+    Raises:
+        EmailCodeRequiredError: Если re-auth уже идёт или есть email code сессия.
+    """
+    # 1. Синхронная проверка + захват (нет await между check и add → нет race condition)
+    if tg_user_id in _reauth_in_progress:
+        logger.info(f"Re-auth already in progress for user {tg_user_id}, skipping")
+        if notify:
+            await send_email_code_notification(db, tg_user_id, source=source)
+        raise EmailCodeRequiredError(tg_user_id=tg_user_id, source=source)
+    _reauth_in_progress.add(tg_user_id)
+
+    # 2. Проверка БД (безопасно, т.к. мы уже захватили блокировку)
+    try:
+        existing_session = await db.get_email_code_session(tg_user_id)
+        if existing_session:
+            logger.info(
+                f"Active email code session exists for user {tg_user_id}, "
+                "skipping re-auth"
+            )
+            _reauth_in_progress.discard(tg_user_id)
+            if notify:
+                await send_email_code_notification(db, tg_user_id, source=source)
+            raise EmailCodeRequiredError(tg_user_id=tg_user_id, source=source)
+    except EmailCodeRequiredError:
+        raise
+    except Exception:
+        _reauth_in_progress.discard(tg_user_id)
+        raise
+
+
+def _release_reauth_lock(tg_user_id: int):
+    """Освобождает блокировку re-auth."""
+    _reauth_in_progress.discard(tg_user_id)
+
+
+async def _check_existing_email_session(
+    db: DBModel, tg_user_id: int, source: str = "refresh", notify: bool = False
+):
+    """
+    Проверяет наличие активной email code сессии.
+    Если есть — выбрасывает EmailCodeRequiredError.
+    Предотвращает параллельные re-auth запросы и спам email кодов.
+
+    Args:
+        db: Экземпляр базы данных
+        tg_user_id: Telegram ID пользователя
+        source: Источник запроса
+        notify: Отправлять ли уведомление в Telegram
     """
     existing_session = await db.get_email_code_session(tg_user_id)
     if existing_session:
         logger.info(
-            f"Active email code session already exists for user {tg_user_id}, "
-            "skipping re-auth to prevent email spam"
+            f"Active email code session exists for user {tg_user_id}, "
+            "skipping re-auth"
         )
         if notify:
             await send_email_code_notification(db, tg_user_id, source=source)

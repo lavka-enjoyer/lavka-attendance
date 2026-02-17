@@ -57,7 +57,6 @@ class GroupUserForNfc(BaseModel):
 
     tg_userid: int
     name: str  # fio или login
-    needs_totp: bool = False  # Требуется ли 2FA для этого пользователя
 
 
 class GroupUsersListResponse(BaseModel):

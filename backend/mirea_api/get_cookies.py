@@ -2,7 +2,7 @@ import logging
 import random
 import re
 from dataclasses import dataclass
-from typing import List, Optional, Union
+from typing import Optional, Union
 from urllib.parse import urlparse
 
 import aiohttp
@@ -13,17 +13,6 @@ from backend.database import DBModel
 logger = logging.getLogger(__name__)
 
 COOKIE_FILENAME = "cookies.json"
-
-
-@dataclass
-class TwoFactorRequired:
-    """Результат, когда требуется двухфакторная аутентификация."""
-
-    session_cookies: dict
-    otp_action_url: str
-    credential_id: str
-    message: str = "Требуется ввод TOTP кода"
-    otp_credentials: List[dict] = None  # Список доступных 2FA методов
 
 
 @dataclass
@@ -39,7 +28,7 @@ class EmailCodeRequired:
 class CookiesResult:
     """Успешный результат получения cookies."""
 
-    cookies: List[dict]
+    cookies: list
 
 
 @dataclass
@@ -251,11 +240,10 @@ async def _skip_required_action(
         "Accept-Language": "ru-RU,ru;q=0.8,en-US;q=0.5,en;q=0.3",
     }
 
-    # Keycloak ожидает два поля skip и пустой retry
-    skip_data = aiohttp.FormData()
-    skip_data.add_field("skip", "Пропустить")
-    skip_data.add_field("skip", "true")
-    skip_data.add_field("retry", "")
+    # Keycloak ожидает application/x-www-form-urlencoded (не multipart)
+    # Используем строку для поддержки дублирующихся ключей (skip)
+    from urllib.parse import urlencode
+    skip_data = urlencode([("skip", "Пропустить"), ("skip", "true"), ("retry", "")])
 
     async with session.post(
         skip_url,
@@ -272,108 +260,16 @@ async def _skip_required_action(
         return final_url, response.status, response_text
 
 
-def _is_otp_page(page_text: str) -> bool:
-    """Проверяет, является ли страница формой ввода OTP кода."""
-    # Сначала исключаем страницу max-account-config (она тоже содержит "totp")
-    if _is_max_account_config_page(page_text):
-        return False
-
-    # Keycloak OTP страница содержит поле otp и специфичные маркеры
-    return (
-        '"otpLogin"' in page_text
-        or 'name="otp"' in page_text
-        or "selectedCredentialId" in page_text
-        or "totp" in page_text.lower()
-    )
-
-
-def _extract_otp_form_data(page_text: str, current_url: str) -> Optional[dict]:
-    """Извлекает данные формы OTP из страницы Keycloak."""
-    logger.info(f"Extracting OTP form data, page length: {len(page_text)}")
-
-    otp_action_url = None
-
-    # Способ 1: Ищем loginAction URL в kcContext.url.loginAction (новый Keycloak с React)
-    login_action_match = re.search(r'"loginAction":\s*"([^"]*)"', page_text)
-    if login_action_match:
-        otp_action_url = login_action_match.group(1).encode().decode("unicode-escape")
-        logger.info(f"Found loginAction URL: {otp_action_url}")
-
-    # Способ 2: Ищем форму напрямую в HTML
-    if not otp_action_url:
-        soup = BeautifulSoup(page_text, "html.parser")
-        form = soup.find("form", id="kc-otp-login-form") or soup.find("form")
-        if form and form.get("action"):
-            otp_action_url = form["action"].replace("&amp;", "&")
-            logger.info(f"Found form action: {otp_action_url}")
-            if not otp_action_url.startswith("http"):
-                parsed = urlparse(current_url)
-                otp_action_url = f"{parsed.scheme}://{parsed.netloc}{otp_action_url}"
-
-    if not otp_action_url:
-        logger.error(f"No OTP action URL found. Page preview: {page_text[:3000]}")
-        return None
-
-    # Извлекаем список всех доступных credentials
-    otp_credentials = []
-    credentials_match = re.search(
-        r'"userOtpCredentials":\s*\[(.*?)\]', page_text, re.DOTALL
-    )
-    if credentials_match:
-        credentials_json = credentials_match.group(1)
-        # Парсим каждый credential
-        for cred_match in re.finditer(
-            r'\{\s*[^}]*"userLabel":\s*"([^"]*)"[^}]*"id":\s*"([^"]*)"[^}]*\}|'
-            r'\{\s*[^}]*"id":\s*"([^"]*)"[^}]*"userLabel":\s*"([^"]*)"[^}]*\}',
-            credentials_json
-        ):
-            if cred_match.group(1) and cred_match.group(2):
-                otp_credentials.append({
-                    "userLabel": cred_match.group(1),
-                    "id": cred_match.group(2)
-                })
-            elif cred_match.group(3) and cred_match.group(4):
-                otp_credentials.append({
-                    "userLabel": cred_match.group(4),
-                    "id": cred_match.group(3)
-                })
-        logger.info(f"Found {len(otp_credentials)} OTP credentials: {otp_credentials}")
-
-    # Ищем selectedCredentialId в нескольких местах
-    credential_id = ""
-
-    # Способ 1: В kcContext.otpLogin.selectedCredentialId
-    credential_match = re.search(r'"selectedCredentialId":\s*"([^"]*)"', page_text)
-    if credential_match:
-        credential_id = credential_match.group(1)
-        logger.info(f"Found selectedCredentialId in JSON: {credential_id}")
-
-    # Способ 2: В hidden input
-    if not credential_id:
-        credential_match = re.search(
-            r'name="selectedCredentialId"\s+value="([^"]*)"', page_text
-        )
-        if credential_match:
-            credential_id = credential_match.group(1)
-            logger.info(f"Found selectedCredentialId in hidden input: {credential_id}")
-
-    return {
-        "otp_action_url": otp_action_url,
-        "credential_id": credential_id,
-        "otp_credentials": otp_credentials
-    }
-
-
 async def get_cookies(
     user_login: str,
     password: str,
     user_agent: str = None,
     tg_user_id: int = None,
     db: DBModel = None,
-) -> Union[list, TwoFactorRequired]:
+) -> Union[list, EmailCodeRequired]:
     """
     Асинхронно выполняет авторизацию на https://attendance.mirea.ru через Keycloak SSO
-    и возвращает куки в виде списка словарей или TwoFactorRequired если нужен OTP.
+    и возвращает куки в виде списка словарей или EmailCodeRequired если нужен код из email.
 
     Аргументы:
     user_login (str): Логин пользователя (email).
@@ -384,7 +280,7 @@ async def get_cookies(
 
     Возвращает:
     list: [cookies] при успешной авторизации
-    TwoFactorRequired: если требуется ввод TOTP кода
+    EmailCodeRequired: если требуется ввод кода из email
     """
     logger.info(f"Получаю новые куки для пользователя {tg_user_id}")
     try:
@@ -521,26 +417,6 @@ async def get_cookies(
                             "Обнаружена страница max-account-config, но не удалось извлечь URL для пропуска"
                         )
 
-                # Проверяем, не требуется ли OTP
-                if post_response.status == 200 and _is_otp_page(response_text):
-                    logger.info(
-                        f"Обнаружена страница 2FA для пользователя {tg_user_id}"
-                    )
-                    otp_data = _extract_otp_form_data(response_text, final_redirect_url)
-
-                    if otp_data:
-                        session_cookies = _extract_session_cookies(session)
-                        return TwoFactorRequired(
-                            session_cookies=session_cookies,
-                            otp_action_url=otp_data["otp_action_url"],
-                            credential_id=otp_data["credential_id"],
-                            otp_credentials=otp_data.get("otp_credentials", []),
-                        )
-                    else:
-                        raise Exception(
-                            "Обнаружена 2FA, но не удалось извлечь данные формы OTP"
-                        )
-
                 # Проверяем успешность авторизации
                 if post_response.status != 200:
                     raise Exception(f"Ошибка авторизации. Код: {post_response.status}")
@@ -590,7 +466,7 @@ async def submit_email_code(
     session_cookies: dict,
     user_agent: str = None,
     tg_user_id: int = None,
-) -> Union[list, TwoFactorRequired, EmailCodeRequired]:
+) -> Union[list, EmailCodeRequired]:
     """
     Отправляет email код для прохождения проверки по почте.
 
@@ -603,7 +479,6 @@ async def submit_email_code(
 
     Возвращает:
     list: [cookies] при успешной авторизации
-    TwoFactorRequired: если после email кода требуется OTP
     EmailCodeRequired: если код неверный и нужно повторить ввод
     """
     logger.info(f"Отправка email кода для пользователя {tg_user_id}")
@@ -702,25 +577,6 @@ async def submit_email_code(
                             "но не удалось извлечь URL для пропуска"
                         )
 
-                # Проверяем, не требуется ли теперь OTP (2FA)
-                if response.status == 200 and _is_otp_page(response_text):
-                    logger.info(
-                        f"После email кода требуется OTP для пользователя {tg_user_id}"
-                    )
-                    otp_data = _extract_otp_form_data(response_text, final_url)
-                    if otp_data:
-                        otp_session_cookies = _extract_session_cookies(session)
-                        return TwoFactorRequired(
-                            session_cookies=otp_session_cookies,
-                            otp_action_url=otp_data["otp_action_url"],
-                            credential_id=otp_data["credential_id"],
-                            otp_credentials=otp_data.get("otp_credentials", []),
-                        )
-                    else:
-                        raise Exception(
-                            "После email кода обнаружена 2FA, но не удалось извлечь данные OTP"
-                        )
-
                 # Успешный редирект (302 → attendance-app)
                 if response.status == 200 or response.status == 302:
                     if (
@@ -751,142 +607,3 @@ async def submit_email_code(
         raise
 
 
-async def submit_otp_code(
-    otp_code: str,
-    otp_action_url: str,
-    credential_id: str,
-    session_cookies: dict,
-    user_agent: str = None,
-    tg_user_id: int = None,
-) -> Union[list, TwoFactorRequired]:
-    """
-    Отправляет OTP код для завершения двухфакторной аутентификации.
-
-    Аргументы:
-    otp_code (str): 6-значный TOTP код.
-    otp_action_url (str): URL для отправки OTP.
-    credential_id (str): ID credential из формы.
-    session_cookies (dict): Cookies сессии Keycloak.
-    user_agent (str): User-Agent для запросов.
-    tg_user_id (int): Telegram ID пользователя для логирования.
-
-    Возвращает:
-    list: [cookies] при успешной авторизации
-    TwoFactorRequired: если код неверный и нужно повторить ввод
-    """
-    logger.info(f"Отправка OTP кода для пользователя {tg_user_id}")
-
-    try:
-        # Создаём cookie jar с сохранёнными cookies
-        jar = aiohttp.CookieJar()
-
-        async with aiohttp.ClientSession(cookie_jar=jar) as session:
-            # Восстанавливаем cookies в сессию
-            for name, cookie_data in session_cookies.items():
-                # Обрабатываем domain - может быть строкой, списком или кортежем
-                domain = cookie_data.get("domain", "sso.mirea.ru")
-                if isinstance(domain, (list, tuple)):
-                    domain = domain[0] if domain and domain[0] else "sso.mirea.ru"
-                # Убираем точку в начале домена, если есть
-                if domain.startswith("."):
-                    domain = domain[1:]
-
-                jar.update_cookies(
-                    {name: cookie_data["value"]},
-                    response_url=aiohttp.client.URL(f"https://{domain}"),
-                )
-
-            random_mobile_ua = (
-                user_agent
-                if user_agent is not None
-                else generate_random_mobile_user_agent()
-            )
-
-            headers = {
-                "Content-Type": "application/x-www-form-urlencoded",
-                "User-Agent": random_mobile_ua,
-                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-                "Accept-Language": "ru-RU,ru;q=0.8,en-US;q=0.5,en;q=0.3",
-            }
-
-            otp_data = {
-                "otp": otp_code,
-                "login": "Вход",
-            }
-            if credential_id:
-                otp_data["selectedCredentialId"] = credential_id
-
-            logger.info(f"Отправка OTP на URL: {otp_action_url}")
-
-            async with session.post(
-                otp_action_url,
-                data=otp_data,
-                headers=headers,
-                allow_redirects=True,
-                timeout=aiohttp.ClientTimeout(total=15),
-            ) as response:
-                final_url = str(response.url)
-                response_text = await response.text()
-                logger.info(f"OTP ответ: статус={response.status}, URL={final_url}")
-
-                # Проверяем, нужно ли повторить ввод OTP (неверный код)
-                if response.status == 200 and _is_otp_page(response_text):
-                    logger.warning(f"Неверный OTP код для пользователя {tg_user_id}")
-                    otp_form_data = _extract_otp_form_data(response_text, final_url)
-
-                    if otp_form_data:
-                        new_session_cookies = _extract_session_cookies(session)
-                        return TwoFactorRequired(
-                            session_cookies=new_session_cookies,
-                            otp_action_url=otp_form_data["otp_action_url"],
-                            credential_id=otp_form_data["credential_id"],
-                            message="Неверный код. Попробуйте снова.",
-                            otp_credentials=otp_form_data.get("otp_credentials", []),
-                        )
-                    else:
-                        raise Exception("Неверный OTP код")
-
-                # Проверяем, не попали ли на страницу max-account-config после OTP
-                if response.status == 200 and _is_max_account_config_page(response_text):
-                    logger.info(
-                        f"После OTP обнаружена страница max-account-config для {tg_user_id}, пропускаем"
-                    )
-                    skip_url = _extract_skip_action_url(response_text, final_url)
-                    if skip_url:
-                        final_url, skip_status, response_text = await _skip_required_action(
-                            session, skip_url, random_mobile_ua, tg_user_id
-                        )
-                        cookies = _extract_cookies_list(session)
-                        logger.info(
-                            f"2FA + пропуск Max для пользователя {tg_user_id}! "
-                            f"Получено {len(cookies)} cookies"
-                        )
-                        return [cookies]
-                    else:
-                        raise Exception(
-                            "После OTP обнаружена страница max-account-config, "
-                            "но не удалось извлечь URL для пропуска"
-                        )
-
-                # Проверяем успешный редирект (302 -> attendance-app)
-                if response.status == 200 or response.status == 302:
-                    if "attendance-app.mirea.ru" in final_url or response.status == 302:
-                        # Успешная авторизация
-                        cookies = _extract_cookies_list(session)
-                        logger.info(
-                            f"2FA успешна для пользователя {tg_user_id}! "
-                            f"Получено {len(cookies)} cookies"
-                        )
-                        return [cookies]
-
-                raise Exception(
-                    f"Неожиданный ответ при проверке OTP: {response.status}"
-                )
-
-    except aiohttp.ClientError as e:
-        logger.error(f"Ошибка сети при отправке OTP для {tg_user_id}: {str(e)}")
-        raise Exception(f"Ошибка подключения: {str(e)}")
-
-    except Exception as e:
-        logger.error(f"Ошибка при отправке OTP для {tg_user_id}: {str(e)}")
-        raise

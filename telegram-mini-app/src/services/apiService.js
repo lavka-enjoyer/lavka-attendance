@@ -157,11 +157,6 @@ const apiService = {
             throw new Error("Требуется ввод кода из email");
         }
 
-        // Проверяем на требование 2FA
-        if (data.needs_2fa) {
-            throw new Error("Требуется ввод кода 2FA");
-        }
-
         // Проверяем на наличие обязательных полей
         if (!data.group || !data.FIO) {
             throw new Error("Неверный формат данных пользователя");

@@ -4,13 +4,13 @@ from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException
 
-from backend.attendance import _handle_2fa_result, send_2fa_notification, try_auto_2fa
+from backend.attendance import _handle_email_code_result, send_email_code_notification
 from backend.dependencies import init_data
 from backend.mirea_api.get_acs_events import (
     determine_university_status,
     get_acs_events_for_date,
 )
-from backend.mirea_api.get_cookies import get_cookies, TwoFactorRequired
+from backend.mirea_api.get_cookies import get_cookies, EmailCodeRequired
 from backend.utils_helper import db
 
 from .schemas import (
@@ -79,27 +79,16 @@ async def get_user_university_status(tg_userid: int) -> dict:
             db=db,
         )
 
-        # Проверяем что не требуется 2FA
-        if isinstance(cookies_result, TwoFactorRequired):
-            logger.warning(f"2FA required for university status check, tg_userid={tg_userid}")
+        # Проверяем что не требуется email код
+        if isinstance(cookies_result, EmailCodeRequired):
+            logger.warning(f"Email code required for university status check, tg_userid={tg_userid}")
+            return {"is_in_university": None, "last_event_time": None}
 
-            # Пробуем автоматическую 2FA (если у пользователя сохранён totp_secret)
-            auto_result = await try_auto_2fa(db, tg_userid, cookies_result, user_agent)
-            if auto_result:
-                cookies = auto_result["cookies"]
-                await db.create_cookie(tg_userid, json.dumps(cookies))
-                logger.info(f"Auto-2FA succeeded for university status, tg_userid={tg_userid}")
-            else:
-                # Авто-2FA не удалась — сохраняем сессию и уведомляем в Telegram
-                await _handle_2fa_result(db, tg_userid, cookies_result, user_agent, source="refresh")
-                await send_2fa_notification(db, tg_userid, source="refresh")
-                return {"is_in_university": None, "last_event_time": None, "needs_totp": True}
-        else:
-            cookies = (
-                cookies_result[0] if isinstance(cookies_result, list) else cookies_result
-            )
-            # Кэшируем новые куки
-            await db.create_cookie(tg_userid, json.dumps(cookies))
+        cookies = (
+            cookies_result[0] if isinstance(cookies_result, list) else cookies_result
+        )
+        # Кэшируем новые куки
+        await db.create_cookie(tg_userid, json.dumps(cookies))
 
         # Получаем события ACS с новыми куками
         events = await get_acs_events_for_date(
@@ -343,7 +332,6 @@ async def get_group_users_for_nfc(tg_userid: int = Depends(init_data)):
             result_users.append(GroupUserForNfc(
                 tg_userid=u["tg_userid"],
                 name=name,
-                needs_totp=u.get("needs_totp", False),
             ))
 
         return GroupUsersListResponse(status="success", users=result_users)
@@ -414,39 +402,28 @@ async def get_mirea_cookies_for_user(
                 db=db,
             )
 
-            # Обработка 2FA
-            if isinstance(cookies_result, TwoFactorRequired):
-                logger.warning(f"2FA required for mirea-cookies, target_tg_userid={target_tg_userid}")
+            # Обработка email кода
+            if isinstance(cookies_result, EmailCodeRequired):
+                logger.warning(f"Email code required for mirea-cookies, target_tg_userid={target_tg_userid}")
 
-                # Пробуем автоматическую 2FA
-                auto_result = await try_auto_2fa(db, target_tg_userid, cookies_result, user_agent)
-                if auto_result:
-                    cookies = auto_result["cookies"]
-                    await db.create_cookie(target_tg_userid, json.dumps(cookies))
-                    logger.info(f"Auto-2FA succeeded for mirea-cookies, target_tg_userid={target_tg_userid}")
-                else:
-                    # Авто-2FA не удалась — сохраняем сессию и уведомляем
-                    await _handle_2fa_result(db, target_tg_userid, cookies_result, user_agent, source="refresh")
-                    await send_2fa_notification(db, target_tg_userid, source="refresh")
-
-                    display_name = (
-                        target_user_full.get("fio")
-                        or target_user_full.get("login")
-                        or f"User {target_tg_userid}"
-                    )
-                    return MireaCookiesResponse(
-                        status="2fa_required",
-                        tg_userid=target_tg_userid,
-                        name=display_name,
-                        cookies={},
-                        message="Пользователю нужно ввести TOTP в Mini App бота",
-                    )
-            else:
-                cookies = (
-                    cookies_result[0]
-                    if isinstance(cookies_result, list)
-                    else cookies_result
+                display_name = (
+                    target_user_full.get("fio")
+                    or target_user_full.get("login")
+                    or f"User {target_tg_userid}"
                 )
+                return MireaCookiesResponse(
+                    status="email_code_required",
+                    tg_userid=target_tg_userid,
+                    name=display_name,
+                    cookies={},
+                    message="Пользователю нужно ввести код из email в Mini App бота",
+                )
+
+            cookies = (
+                cookies_result[0]
+                if isinstance(cookies_result, list)
+                else cookies_result
+            )
 
             # Преобразуем в dict для ответа
             cookies_dict = {cookie["name"]: cookie["value"] for cookie in cookies}

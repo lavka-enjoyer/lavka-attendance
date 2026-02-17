@@ -30,13 +30,6 @@ class CheckUserNeedsLogin:
 
 
 @dataclass
-class CheckUserNeeds2FA:
-    """Пользователю нужно ввести TOTP код."""
-
-    message: str = "Требуется ввод кода 2FA"
-
-
-@dataclass
 class CheckUserNeedsEmailCode:
     """Пользователю нужно ввести код из email."""
 
@@ -45,7 +38,7 @@ class CheckUserNeedsEmailCode:
 
 # Type alias для результата _check_user
 CheckUserResult = (
-    CheckUserSuccess | CheckUserError | CheckUserNeedsLogin | CheckUserNeeds2FA | CheckUserNeedsEmailCode
+    CheckUserSuccess | CheckUserError | CheckUserNeedsLogin | CheckUserNeedsEmailCode
 )
 
 

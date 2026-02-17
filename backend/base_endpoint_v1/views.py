@@ -19,7 +19,6 @@ from .crud import (
 )
 from .schemas import (
     CheckUserError,
-    CheckUserNeeds2FA,
     CheckUserNeedsEmailCode,
     CheckUserNeedsLogin,
     DeleteUser,
@@ -119,11 +118,6 @@ async def check_user(
             return {"ok": False, "needs_login": True, "msg": result.message}
         if isinstance(result, CheckUserNeedsEmailCode):
             return {"ok": False, "needs_email_code": True, "msg": result.message}
-        if isinstance(result, CheckUserNeeds2FA):
-            return {"ok": False, "needs_2fa": True, "msg": result.message}
-
-        # Проверяем наличие сохранённого TOTP секрета
-        has_totp_secret = await db.has_totp_secret(tg_user_id)
 
         # result is CheckUserSuccess
         return {
@@ -131,7 +125,6 @@ async def check_user(
             "allowConfirm": result.user_info["allowconfirm"],
             "FIO": result.fio,
             "admin_lvl": result.user_info["admin_lvl"],
-            "has_totp_secret": has_totp_secret,
         }
 
     except Exception as e:

@@ -9,22 +9,17 @@ from cryptography.fernet import Fernet
 from fastapi import APIRouter, Header, HTTPException, Query
 
 from backend.attendance import (
-    _handle_2fa_result,
     _handle_email_code_result,
-    complete_2fa_login,
-    send_2fa_notification,
     send_email_code_notification,
 )
 from backend.auth import verify_init_data
 from backend.config import BOT_TOKEN, TRUSTED_SERVICE_API_KEY
-from backend.mirea_api.get_cookies import EmailCodeRequired, TwoFactorRequired, get_cookies
+from backend.mirea_api.get_cookies import EmailCodeRequired, get_cookies
 from backend.utils_helper import db
 
 from .schemas import (
     CredentialsResponse,
     MireaTokenResponse,
-    SubmitTotpRequest,
-    SubmitTotpResponse,
     TokenRegisterRequest,
     TokenRegisterResponse,
     TokenStatusResponse,
@@ -256,7 +251,6 @@ async def get_credentials(
     Endpoint для получения логина и пароля MIREA.
 
     Используется внешним прокси-сервером для самостоятельной авторизации в MIREA.
-    Прокси может затем обрабатывать 2FA на своём IP.
 
     Параметры:
     - authorization: Bearer токен (обязательный)
@@ -316,21 +310,15 @@ async def get_credentials(
                 detail="User credentials not found. Please set up login and password first",
             )
 
-        # Получаем TOTP секрет и credential_id для авто-2FA
-        target_id = target_tg_userid if (target_tg_userid and target_tg_userid != requester_tg_userid) else requester_tg_userid
-        totp_secret = await db.get_totp_secret(target_id)
-        totp_credential_id = await db.get_totp_credential_id(target_id)
-
         # Получаем сохранённые cookies
+        target_id = target_tg_userid if (target_tg_userid and target_tg_userid != requester_tg_userid) else requester_tg_userid
         cookie_record = await db.get_cookie(target_id)
         stored_cookies = cookie_record.get("cookies") if cookie_record else None
 
-        # Шифруем credentials + TOTP + cookies токеном запрашивающего
+        # Шифруем credentials + cookies токеном запрашивающего
         payload = {
             "l": user["login"],
             "p": user["hashed_password"],
-            "ts": totp_secret,
-            "tc": totp_credential_id,
             "sc": stored_cookies,
         }
         fernet = Fernet(_derive_fernet_key(token))
@@ -442,18 +430,6 @@ async def get_mirea_token(
                     detail="Email code required. User has been notified to enter email code in Mini App.",
                 )
 
-            # Проверяем, не требуется ли 2FA
-            if isinstance(cookies_result, TwoFactorRequired):
-                # Сохраняем сессию 2FA и отправляем уведомление пользователю
-                await _handle_2fa_result(
-                    db, tg_userid, cookies_result, user_agent, source="external"
-                )
-                await send_2fa_notification(db, tg_userid, source="external")
-                raise HTTPException(
-                    status_code=403,
-                    detail="2FA required. User has been notified to enter TOTP code in Mini App.",
-                )
-
             cookies = (
                 cookies_result[0]
                 if isinstance(cookies_result, list)
@@ -496,81 +472,3 @@ async def get_mirea_token(
         await db.disconnect()
 
 
-@router.post("/submit-totp", response_model=SubmitTotpResponse)
-async def submit_totp(
-    request: SubmitTotpRequest,
-    authorization: str = Header(None),
-):
-    """
-    Отправляет TOTP код для завершения двухфакторной аутентификации.
-
-    Требует Authorization header с токеном, полученным ранее.
-    После успешной отправки возвращает cookies MIREA.
-    """
-    try:
-        if not authorization:
-            raise HTTPException(status_code=401, detail="Authorization header missing")
-
-        parts = authorization.split()
-        if len(parts) != 2 or parts[0].lower() != "bearer":
-            raise HTTPException(
-                status_code=401, detail="Invalid authorization header format"
-            )
-
-        token = parts[1]
-
-        await db.connect()
-
-        token_data = await db.get_external_token(token)
-
-        if not token_data:
-            raise HTTPException(status_code=401, detail="Invalid token")
-
-        if token_data["status"] != "approved":
-            raise HTTPException(status_code=401, detail="Token not approved")
-        _check_token_expiration(token_data)
-
-        tg_userid = token_data["tg_userid"]
-
-        # Проверяем наличие TOTP сессии
-        totp_session = await db.get_totp_session(tg_userid)
-        if not totp_session:
-            raise HTTPException(
-                status_code=400,
-                detail="No 2FA session found. Request mirea-token first.",
-            )
-
-        # Отправляем TOTP код
-        result = await complete_2fa_login(db, tg_userid, request.totp_code)
-
-        if isinstance(result, TwoFactorRequired):
-            # Неверный код, нужно повторить
-            return SubmitTotpResponse(
-                status="invalid_code",
-                message="Invalid TOTP code. Please try again.",
-            )
-
-        # Успех - получаем свежие cookies
-        import json
-
-        cookie_record = await db.get_cookie(tg_userid)
-        if cookie_record and cookie_record.get("cookies"):
-            cookies = json.loads(cookie_record["cookies"])
-            return SubmitTotpResponse(
-                status="success",
-                message="2FA completed successfully",
-                cookies=cookies,
-            )
-        else:
-            return SubmitTotpResponse(
-                status="success",
-                message="2FA completed, but cookies not found. Try mirea-token again.",
-            )
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error in submit_totp: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail="Internal server error")
-    finally:
-        await db.disconnect()

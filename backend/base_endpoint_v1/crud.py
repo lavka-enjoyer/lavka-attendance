@@ -3,7 +3,7 @@ import logging
 
 from starlette import status
 
-from backend.attendance import EmailCodeRequiredError, TwoFactorRequiredError, get_us_info
+from backend.attendance import EmailCodeRequiredError, get_us_info
 from backend.database import DBModel
 from backend.mirea_api.get_acs_events import (
     determine_university_status,
@@ -12,7 +12,6 @@ from backend.mirea_api.get_acs_events import (
 
 from .schemas import (
     CheckUserError,
-    CheckUserNeeds2FA,
     CheckUserNeedsEmailCode,
     CheckUserNeedsLogin,
     CheckUserResult,
@@ -57,10 +56,6 @@ async def _check_user(db: DBModel, tg_user_id: int) -> CheckUserResult:
     except EmailCodeRequiredError:
         logger.info(f"Email code required for user {tg_user_id}")
         return CheckUserNeedsEmailCode()
-
-    except TwoFactorRequiredError:
-        logger.info(f"2FA required for user {tg_user_id}")
-        return CheckUserNeeds2FA()
 
     except Exception as ex:
         logger.error(f"Error checking user {tg_user_id}: {ex}", exc_info=True)
@@ -212,14 +207,14 @@ async def _get_group_university_status(db: DBModel, tg_user_id: int) -> dict:
 
             # Получаем FIO из API МИРЭА (это также обновляет куки если нужно)
             fio = "Неизвестный студент"
-            needs_2fa = False
+            needs_reauth = False
             try:
                 # Получаем user_agent и FIO через get_us_info
                 user_agent_for_fio = await db.get_user_agent(user_tg_id)
                 fio = await get_us_info(db, user_tg_id, user_agent_for_fio)
-            except (TwoFactorRequiredError, EmailCodeRequiredError):
-                # Требуется 2FA или email код - проверим позже
-                needs_2fa = True
+            except EmailCodeRequiredError:
+                # Требуется email код - проверим позже
+                needs_reauth = True
                 # Пробуем получить FIO из БД
                 saved_fio = await db.get_fio(user_tg_id)
                 fio = saved_fio if saved_fio else f"Студент #{user_tg_id}"
@@ -237,21 +232,20 @@ async def _get_group_university_status(db: DBModel, tg_user_id: int) -> dict:
                 else None
             )
 
-            # Если нет кук, проверяем есть ли pending 2FA сессия или требуется 2FA
+            # Если нет кук, проверяем есть ли pending email code сессия или требуется реавторизация
             if not cookies:
-                # Проверяем есть ли активная 2FA или email code сессия
-                totp_session = await db.get_totp_session(user_tg_id)
+                # Проверяем есть ли активная email code сессия
                 email_code_session = await db.get_email_code_session(user_tg_id)
-                if needs_2fa or totp_session or email_code_session:
+                if needs_reauth or email_code_session:
                     result.append(
                         {
                             "fio": fio,
                             "tg_id": user_tg_id,
                             "is_inside_university": False,
-                            "needs_2fa": True,
+                            "needs_reauth": True,
                             "last_event_time": None,
-                            "time_in_university": "Требуется 2FA",
-                            "time_out_university": "Требуется 2FA",
+                            "time_in_university": "Требуется авторизация",
+                            "time_out_university": "Требуется авторизация",
                             "events_count": 0,
                         }
                     )
@@ -410,11 +404,11 @@ async def _get_group_university_status(db: DBModel, tg_user_id: int) -> dict:
                 )
 
         # Сортируем: сначала кто в университете, потом кто вне,
-        # затем требующие 2FA, в конце неактивированные
+        # затем требующие авторизации, в конце неактивированные
         result.sort(
             key=lambda x: (
                 x.get("not_activated", False),  # Неактивированные в самом конце
-                x.get("needs_2fa", False),  # Требующие 2FA перед ними
+                x.get("needs_reauth", False),  # Требующие авторизации перед ними
                 not x.get("is_inside_university", False),  # Затем по статусу в унике
                 x.get("fio", ""),  # Затем по алфавиту
             )

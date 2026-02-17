@@ -54,26 +54,6 @@ class SearchUsers(BaseModel):
     offset: int = 0
 
 
-class SubmitOtpCode(BaseModel):
-    """Схема для отправки OTP кода."""
-
-    initData: str
-    otp_code: str
-
-
-class CheckTotpSession(BaseModel):
-    """Схема для проверки наличия 2FA сессии."""
-
-    initData: str
-
-
-class SelectOtpCredential(BaseModel):
-    """Схема для выбора OTP credential."""
-
-    initData: str
-    credential_id: str
-
-
 class SubmitEmailCode(BaseModel):
     """Схема для отправки кода из email."""
 

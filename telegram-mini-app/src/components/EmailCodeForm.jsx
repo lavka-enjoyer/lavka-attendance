@@ -2,7 +2,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Mail, AlertTriangle, RefreshCw } from 'lucide-react';
 
-const EmailCodeForm = ({ initData, onSuccess, onRequires2fa, onBack }) => {
+const EmailCodeForm = ({ initData, onSuccess, onBack }) => {
   const [code, setCode] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -38,9 +38,6 @@ const EmailCodeForm = ({ initData, onSuccess, onRequires2fa, onBack }) => {
 
       if (data.success) {
         onSuccess(data);
-      } else if (data.requires_2fa) {
-        // После email кода нужен ещё OTP
-        onRequires2fa(data);
       } else if (data.requires_email_code) {
         // Неверный код - очищаем поле
         setCode('');

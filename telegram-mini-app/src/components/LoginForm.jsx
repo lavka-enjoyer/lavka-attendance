@@ -2,7 +2,6 @@ import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { getModifiedUserAgent } from '../utils/telegramUtils';
 import UserAgentConstructor from './UserAgentConstructor';
-import OtpForm from './OtpForm';
 import EmailCodeForm from './EmailCodeForm';
 import { Smartphone, Settings, AlertTriangle, HelpCircle, LogIn, User, Lock } from 'lucide-react';
 
@@ -39,11 +38,6 @@ const safeUpdateUser = async (initData, login, password, customUserAgent = null)
     // Проверяем на требование email кода (info.requires_email_code)
     if (data && data.info && data.info.requires_email_code) {
       return { success: false, data: { requires_email_code: true, message: data.info.message } };
-    }
-
-    // Проверяем на требование 2FA (info.requires_2fa)
-    if (data && data.info && data.info.requires_2fa) {
-      return { success: false, data: { requires_2fa: true, message: data.info.message } };
     }
 
     // Проверяем на наличие ошибки в данных
@@ -101,7 +95,6 @@ const LoginForm = ({ initData, onLoginSuccess }) => {
   const [showUserAgentModal, setShowUserAgentModal] = useState(false);
   const [customUserAgent, setCustomUserAgent] = useState('');
   const [deviceInfo, setDeviceInfo] = useState('Выберите устройство');
-  const [showOtpForm, setShowOtpForm] = useState(false);
   const [showEmailCodeForm, setShowEmailCodeForm] = useState(false);
 
   // Определяем читаемое устройство из User-Agent
@@ -181,13 +174,6 @@ const LoginForm = ({ initData, onLoginSuccess }) => {
           return;
         }
 
-        // Проверяем, нужна ли 2FA
-        if (updateResult.data && updateResult.data.requires_2fa) {
-          setShowOtpForm(true);
-          setLoading(false);
-          return;
-        }
-
         // Специальная обработка ошибки неверного логина/пароля
         if (updateResult.error && updateResult.error.includes("Неверный логин или пароль")) {
           setError('Неверный логин или пароль');
@@ -213,27 +199,6 @@ const LoginForm = ({ initData, onLoginSuccess }) => {
     }
   };
 
-  // Обработчик успешной 2FA авторизации
-  const handleOtpSuccess = async () => {
-    setShowOtpForm(false);
-    setLoading(true);
-
-    try {
-      // Получаем данные пользователя после успешной 2FA
-      const userDataResult = await safeGetUserData(initData);
-
-      if (userDataResult.success && userDataResult.data) {
-        onLoginSuccess(userDataResult.data);
-      } else {
-        setError(userDataResult.error || 'Не удалось получить данные пользователя');
-      }
-    } catch (err) {
-      setError(err.message || 'Произошла ошибка при получении данных');
-    } finally {
-      setLoading(false);
-    }
-  };
-
   // Обработчик успешной проверки email кода
   const handleEmailCodeSuccess = async () => {
     setShowEmailCodeForm(false);
@@ -254,20 +219,9 @@ const LoginForm = ({ initData, onLoginSuccess }) => {
     }
   };
 
-  // Обработчик перехода из email кода в OTP форму
-  const handleEmailCodeRequires2fa = () => {
-    setShowEmailCodeForm(false);
-    setShowOtpForm(true);
-  };
-
   // Обработчик возврата из email code формы
   const handleEmailCodeBack = () => {
     setShowEmailCodeForm(false);
-  };
-
-  // Обработчик возврата из OTP формы
-  const handleOtpBack = () => {
-    setShowOtpForm(false);
   };
 
   const handleKeyPress = (e) => {
@@ -287,19 +241,7 @@ const LoginForm = ({ initData, onLoginSuccess }) => {
       <EmailCodeForm
         initData={initData}
         onSuccess={handleEmailCodeSuccess}
-        onRequires2fa={handleEmailCodeRequires2fa}
         onBack={handleEmailCodeBack}
-      />
-    );
-  }
-
-  // Показываем OTP форму если требуется 2FA
-  if (showOtpForm) {
-    return (
-      <OtpForm
-        initData={initData}
-        onSuccess={handleOtpSuccess}
-        onBack={handleOtpBack}
       />
     );
   }

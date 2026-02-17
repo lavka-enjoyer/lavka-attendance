@@ -15,13 +15,11 @@ from backend.utils_helper import db
 
 from .crud import (
     _check_email_code_session,
-    _check_totp_session,
     _create_user_part_1_new,
     _get_all,
     _get_all_admin,
     _get_count,
     _submit_email_code,
-    _submit_otp_code,
     _update_user,
 )
 from .schemas import (
@@ -31,10 +29,8 @@ from .schemas import (
     CheckEmailCodeSession,
     CreateUserNew,
     DeleteUserByAdmin,
-    SelectOtpCredential,
     SetAdminLevel,
     SubmitEmailCode,
-    SubmitOtpCode,
     UpdateUser,
 )
 
@@ -313,103 +309,6 @@ async def admin_get_stats(tg_user_id: int = Depends(init_data)) -> Dict[str, Any
         await db.disconnect()
 
 
-@router.post("/submit_otp")
-async def submit_otp(data: SubmitOtpCode) -> Dict[str, Any]:
-    """
-    Отправляет OTP код для завершения двухфакторной аутентификации.
-
-    Args:
-        data: Данные с initData и OTP кодом
-
-    Returns:
-        Словарь с результатом:
-        - success=True и groups при успехе
-        - requires_2fa=True и message если код неверный
-        - error при ошибке
-    """
-    try:
-        tg_user_id = verify_init_data(data.initData, BOT_TOKEN)
-    except ValueError as err:
-        logger.error(f"Auth error in submit_otp: {err}")
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=str(err))
-
-    try:
-        await db.connect()
-        result = await _submit_otp_code(db, tg_user_id, data.otp_code)
-        return result
-    except Exception as e:
-        logger.error(f"Error in submit_otp for {tg_user_id}: {e}", exc_info=True)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Internal server error"
-        )
-    finally:
-        await db.disconnect()
-
-
-@router.get("/check_totp_session")
-async def check_totp_session(initData: str) -> Dict[str, Any]:
-    """
-    Проверяет наличие активной 2FA сессии для пользователя.
-
-    Args:
-        initData: Telegram Mini App initData
-
-    Returns:
-        Словарь с has_session=True если есть активная сессия
-    """
-    try:
-        tg_user_id = verify_init_data(initData, BOT_TOKEN)
-    except ValueError as err:
-        logger.error(f"Auth error in check_totp_session: {err}")
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=str(err))
-
-    try:
-        await db.connect()
-        result = await _check_totp_session(db, tg_user_id)
-        return result
-    except Exception as e:
-        logger.error(
-            f"Error in check_totp_session for {tg_user_id}: {e}", exc_info=True
-        )
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Internal server error"
-        )
-    finally:
-        await db.disconnect()
-
-
-@router.post("/select_otp_credential")
-async def select_otp_credential(data: SelectOtpCredential) -> Dict[str, Any]:
-    """
-    Выбирает OTP credential для 2FA сессии.
-
-    Args:
-        data: Данные с initData и credential_id
-
-    Returns:
-        Словарь с success=True при успехе
-    """
-    try:
-        tg_user_id = verify_init_data(data.initData, BOT_TOKEN)
-    except ValueError as err:
-        logger.error(f"Auth error in select_otp_credential: {err}")
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=str(err))
-
-    try:
-        await db.connect()
-        await db.update_totp_session_credential(tg_user_id, data.credential_id)
-        return {"success": True}
-    except Exception as e:
-        logger.error(
-            f"Error in select_otp_credential for {tg_user_id}: {e}", exc_info=True
-        )
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Internal server error"
-        )
-    finally:
-        await db.disconnect()
-
-
 @router.post("/submit_email_code")
 async def submit_email_code(data: SubmitEmailCode) -> Dict[str, Any]:
     """
@@ -422,7 +321,6 @@ async def submit_email_code(data: SubmitEmailCode) -> Dict[str, Any]:
         Словарь с результатом:
         - success=True и groups при успехе
         - requires_email_code=True если код неверный
-        - requires_2fa=True если после email кода нужен OTP
     """
     try:
         tg_user_id = verify_init_data(data.initData, BOT_TOKEN)

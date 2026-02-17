@@ -5,7 +5,6 @@ import './styles/telegram-theme.css';
 import PageTransition from './components/PageTransition';
 import MainScreen from './components/MainScreen';
 import LoginForm from './components/LoginForm';
-import OtpForm from './components/OtpForm';
 import EmailCodeForm from './components/EmailCodeForm';
 import MarkMultipleScreen from './components/MarkMultipleScreen';
 import MassMarkingProcess from './components/MassMarkingProcess';
@@ -22,10 +21,9 @@ const App = () => {
   const [userData, setUserData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
-  const [screen, setScreen] = useState('main'); // 'main', 'login', 'otp', 'emailCode', 'markMultiple', 'marking', 'unauthorized', 'points', 'admin', 'schedule', 'groupStatus'
+  const [screen, setScreen] = useState('main'); // 'main', 'login', 'emailCode', 'markMultiple', 'marking', 'unauthorized', 'points', 'admin', 'schedule', 'groupStatus'
   const [initData, setInitData] = useState('');
   const [markingData, setMarkingData] = useState(null);
-  const [hasTotpSecret, setHasTotpSecret] = useState(false);
 
   // Добавляем обработчик глобальных ошибок для предотвращения белого экрана
   useEffect(() => {
@@ -91,7 +89,6 @@ const App = () => {
 
       // User exists and authenticated
       setUserData(data);
-      setHasTotpSecret(data.has_totp_secret || false);
       setScreen('main');
 
     } catch (error) {
@@ -102,11 +99,6 @@ const App = () => {
       if (errorStr.includes("Требуется ввод кода из email") ||
           errorStr.includes("email code required")) {
         setScreen('emailCode');
-      }
-      // Проверяем требование 2FA
-      else if (errorStr.includes("Требуется ввод кода 2FA") ||
-          errorStr.includes("2FA required")) {
-        setScreen('otp');
       }
       // Проверяем все возможные варианты текста ошибки авторизации
       else if (errorStr.includes("Введите Логин и Пароль") ||
@@ -143,43 +135,13 @@ const App = () => {
     try {
       const data = await apiService.checkUserAuth(initData);
       setUserData(data);
-      setHasTotpSecret(data.has_totp_secret || false);
       setScreen('main');
     } catch (error) {
       const errorStr = String(error);
-      // After email code, might still need OTP
-      if (errorStr.includes("Требуется ввод кода 2FA") || errorStr.includes("2FA required")) {
-        setScreen('otp');
-      } else if (errorStr.includes("Требуется ввод кода из email") || errorStr.includes("email code required")) {
+      if (errorStr.includes("Требуется ввод кода из email") || errorStr.includes("email code required")) {
         setScreen('emailCode');
       } else {
         setError(errorStr || "Ошибка загрузки данных после подтверждения email");
-      }
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  // Function to handle email code → OTP transition
-  const handleEmailCodeRequires2fa = () => {
-    setScreen('otp');
-  };
-
-  // Function to handle successful OTP - refetch user data
-  const handleOtpSuccess = async () => {
-    setLoading(true);
-    try {
-      const data = await apiService.checkUserAuth(initData);
-      setUserData(data);
-      setHasTotpSecret(data.has_totp_secret || false);
-      setScreen('main');
-    } catch (error) {
-      // Если всё ещё требуется 2FA, остаёмся на форме OTP
-      const errorStr = String(error);
-      if (errorStr.includes("Требуется ввод кода 2FA") || errorStr.includes("2FA required")) {
-        setScreen('otp');
-      } else {
-        setError(errorStr || "Ошибка загрузки данных после 2FA");
       }
     } finally {
       setLoading(false);
@@ -308,20 +270,7 @@ const App = () => {
               <EmailCodeForm
                 initData={initData}
                 onSuccess={handleEmailCodeSuccess}
-                onRequires2fa={handleEmailCodeRequires2fa}
                 onBack={handleBackToMain}
-              />
-            </PageTransition>
-          );
-
-        case 'otp':
-          return (
-            <PageTransition key="otp">
-              <OtpForm
-                initData={initData}
-                onSuccess={handleOtpSuccess}
-                onBack={handleBackToMain}
-                hasTotpSecret={hasTotpSecret}
               />
             </PageTransition>
           );

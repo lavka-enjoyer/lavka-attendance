@@ -56,20 +56,6 @@ class MireaTokenResponse(BaseModel):
     message: str
 
 
-class SubmitTotpRequest(BaseModel):
-    """Запрос на отправку TOTP кода"""
-
-    totp_code: str
-
-
-class SubmitTotpResponse(BaseModel):
-    """Ответ на отправку TOTP кода"""
-
-    status: str  # success, invalid_code, error
-    message: str
-    cookies: Optional[list] = None
-
-
 class CredentialsResponse(BaseModel):
     """Ответ с зашифрованными credentials MIREA для внешнего сервиса"""
 

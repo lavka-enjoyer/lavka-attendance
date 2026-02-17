@@ -65,16 +65,11 @@ async def get_schedules(
                     else:
                         cookies = cookie_data
                 else:
-                    # Получаем новые cookies
-                    logger.debug("Получаем новые cookies")
-                    cookies_result = await get_cookies.get_cookies(
-                        user["login"],
-                        user["hashed_password"],
-                        user_agent,
-                        user_id,
-                        db,
-                    )
-                    cookies = cookies_result[0] if cookies_result else []
+                    # Нет cookies — не пытаемся получать новые здесь,
+                    # чтобы не триггерить повторную авторизацию и спам email кодов.
+                    # Список дисциплин — опциональный, расписание работает и без него.
+                    logger.debug("Нет cookies, пропускаем получение дисциплин")
+                    cookies = []
 
                 logger.debug(f"Cookies: {bool(cookies)}, type: {type(cookies)}")
                 if cookies:

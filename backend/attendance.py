@@ -157,17 +157,51 @@ async def complete_email_code_login(
     cookies = result[0]
     await db.create_cookie(tg_user_id, json.dumps(cookies))
 
+    # Получаем FIO пользователя и сохраняем в БД
+    try:
+        me_info = await get_me_info.get_me_info_full(
+            cookies, tg_user_id, db, user_agent=user_agent
+        )
+        fio = me_info.get("fio", "")
+        if fio:
+            await db.update_fio(tg_user_id, fio)
+            logger.info(f"Saved FIO for user {tg_user_id}: {fio}")
+    except Exception as e:
+        logger.error(f"Error getting FIO after email code for {tg_user_id}: {e}")
+
     if source == "login":
+        # Получаем группы
         try:
             groups = await get_groups.get_group(
                 cookies, tg_user_id, db, user_agent=user_agent
             )
+            if groups and groups[0]:
+                # Сохраняем группу в БД
+                group_name = groups[0][-1]  # последняя = актуальная
+                await db.update_user(tg_user_id, group_name=group_name)
+                logger.info(f"Saved group for user {tg_user_id}: {group_name}")
             return groups[0]
         except Exception as e:
             logger.error(f"Error getting groups after email code for {tg_user_id}: {e}")
             return []
 
     return []
+
+
+async def _check_existing_email_session(db: DBModel, tg_user_id: int, source: str = "refresh", notify: bool = False):
+    """
+    Проверяет, есть ли уже активная email code сессия.
+    Если есть — сразу кидает EmailCodeRequiredError без повторного логина.
+    """
+    existing_session = await db.get_email_code_session(tg_user_id)
+    if existing_session:
+        logger.info(
+            f"Active email code session already exists for user {tg_user_id}, "
+            "skipping re-auth to prevent email spam"
+        )
+        if notify:
+            await send_email_code_notification(db, tg_user_id, source=source)
+        raise EmailCodeRequiredError(tg_user_id=tg_user_id, source=source)
 
 
 async def get_us_info(db, tgID, user_agent=None, notify_on_2fa=False):
@@ -211,6 +245,9 @@ async def get_us_info(db, tgID, user_agent=None, notify_on_2fa=False):
                 )
 
         # Если дошли сюда — куки отсутствуют или не работают
+        # Проверяем, есть ли уже активная email code сессия (предотвращаем спам)
+        await _check_existing_email_session(db, tgID, source="refresh", notify=notify_on_2fa)
+
         # Получаем учётные данные пользователя и обновляем куки
         user = await db.get_user(tgID)
         if not user:
@@ -297,6 +334,9 @@ async def self_approve(db, tgID, token, user_agent=None):
             except Exception as e:
                 if "401" not in str(e):
                     raise e
+
+        # Проверяем, есть ли уже активная email code сессия (предотвращаем спам)
+        await _check_existing_email_session(db, tgID, source="refresh", notify=True)
 
         user = await db.get_user(tgID)
         if not user:
@@ -486,6 +526,9 @@ async def get_user_points(db, tgID, user_agent=None):
                     raise e
                 # Если ошибка 401, продолжаем для обновления кук
 
+        # Проверяем, есть ли уже активная email code сессия (предотвращаем спам)
+        await _check_existing_email_session(db, tgID, source="refresh")
+
         # Получаем или обновляем куки
         user = await db.get_user(tgID)
         if not user:
@@ -570,6 +613,9 @@ async def _get_user_schedule(
                 if "401" not in str(e):
                     raise e
                 # Если ошибка 401, продолжаем для обновления кук
+
+        # Проверяем, есть ли уже активная email code сессия (предотвращаем спам)
+        await _check_existing_email_session(db, user_id, source="refresh")
 
         # Получаем или обновляем куки
         user = await db.get_user(user_id)
@@ -658,6 +704,9 @@ async def get_lesson_attendance_info(
                 if "401" not in str(e):
                     raise e
                 # Если ошибка 401, продолжаем для обновления кук
+
+        # Проверяем, есть ли уже активная email code сессия (предотвращаем спам)
+        await _check_existing_email_session(db, user_id, source="refresh")
 
         # Получаем или обновляем куки
         user = await db.get_user(user_id)

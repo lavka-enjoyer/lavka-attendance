@@ -1,3 +1,4 @@
+import base64
 import logging
 from typing import Optional
 
@@ -23,12 +24,12 @@ async def get_user_schedule(
     Args:
         cookies: Список куки для авторизации
         db: Объект базы данных
-        b64_data: Base64-кодированные данные запроса
+        b64_data: Base64-кодированные данные запроса (gRPC-Web фрейм)
         user_agent: User-Agent для запроса
         tg_user_id: ID пользователя в Telegram
 
     Returns:
-        Список [данные_ответа]
+        Список [base64_данные_ответа]
 
     Raises:
         HTTPException: При ошибке запроса
@@ -39,7 +40,7 @@ async def get_user_schedule(
         "Accept": "*/*",
         "Accept-Encoding": "gzip, deflate, br, zstd",
         "Accept-Language": "ru-RU,ru;q=0.8,en-US;q=0.5,en;q=0.3",
-        "Content-Type": "application/grpc-web-text",
+        "Content-Type": "application/grpc-web+proto",
         "pulse-app-type": "pulse-app",
         "pulse-app-version": "1.6.0+5256",
         "Origin": "https://attendance-app.mirea.ru",
@@ -56,7 +57,8 @@ async def get_user_schedule(
         "x-requested-with": "XMLHttpRequest",
     }
 
-    request_body = b64_data
+    # Декодируем base64 в бинарные данные для отправки как grpc-web+proto
+    request_body = base64.b64decode(b64_data)
     try:
         async with aiohttp.ClientSession() as session:
             session.cookie_jar.update_cookies(cookies_dict)
@@ -68,13 +70,15 @@ async def get_user_schedule(
             ) as response:
                 if response.status != 200:
                     raise HTTPException(
-                        status_code=response.status, detail=response.text
+                        status_code=response.status, detail=str(response.status)
                     )
 
-                response_data = await response.text()
+                # Читаем бинарный ответ и кодируем обратно в base64
+                response_bytes = await response.read()
 
-        logger.debug(f"b64_data: {b64_data}")
-        return [response_data]
+        response_b64 = base64.b64encode(response_bytes).decode("utf-8")
+        logger.debug(f"Schedule response: {len(response_bytes)} bytes")
+        return [response_b64]
 
     except Exception as e:
         logger.error(f"Ошибка при получении расписания: {e}")

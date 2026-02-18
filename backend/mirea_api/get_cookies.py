@@ -380,24 +380,10 @@ async def get_cookies(
                     f"Статус: {post_response.status}, Конечный URL: {final_redirect_url}"
                 )
 
-                # Проверяем, не требуется ли ввод email кода
-                if post_response.status == 200 and _is_email_code_page(response_text):
-                    logger.info(
-                        f"Обнаружена страница email кода для пользователя {tg_user_id}"
-                    )
-                    email_action_url = _extract_email_code_form_url(
-                        response_text, final_redirect_url
-                    )
-                    if email_action_url:
-                        session_cookies = _extract_session_cookies(session)
-                        return EmailCodeRequired(
-                            session_cookies=session_cookies,
-                            email_code_action_url=email_action_url,
-                        )
-                    else:
-                        raise Exception(
-                            "Обнаружена страница email кода, но не удалось извлечь URL формы"
-                        )
+                # ВАЖНО: проверяем max-account-config ПЕРЕД email code page,
+                # т.к. страница max-account-config содержит строку
+                # "email-authenticator" в kcContext, что ложно срабатывает
+                # на _is_email_code_page и вызывает ненужный email code цикл.
 
                 # Проверяем, не попали ли на страницу max-account-config (предложение привязать Max)
                 if post_response.status == 200 and _is_max_account_config_page(response_text):
@@ -415,6 +401,25 @@ async def get_cookies(
                     else:
                         raise Exception(
                             "Обнаружена страница max-account-config, но не удалось извлечь URL для пропуска"
+                        )
+
+                # Проверяем, не требуется ли ввод email кода
+                if post_response.status == 200 and _is_email_code_page(response_text):
+                    logger.info(
+                        f"Обнаружена страница email кода для пользователя {tg_user_id}"
+                    )
+                    email_action_url = _extract_email_code_form_url(
+                        response_text, final_redirect_url
+                    )
+                    if email_action_url:
+                        session_cookies = _extract_session_cookies(session)
+                        return EmailCodeRequired(
+                            session_cookies=session_cookies,
+                            email_code_action_url=email_action_url,
+                        )
+                    else:
+                        raise Exception(
+                            "Обнаружена страница email кода, но не удалось извлечь URL формы"
                         )
 
                 # Проверяем успешность авторизации

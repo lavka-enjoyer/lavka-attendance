@@ -295,12 +295,26 @@ async def get_us_info(db, tgID, user_agent=None, notify_on_2fa=False):
                 if info[0].strip():
                     return info[0]
             except Exception as e:
-                # Если не удалось, продолжаем обновление куки
                 logger.debug(
                     f"Failed to get info with existing cookies for {tgID}: {e}"
                 )
+                # Если куки есть, но get_me_info не сработал — пробуем FIO из БД
+                # ПЕРЕД re-auth, чтобы не запускать новый email code цикл.
+                # Re-auth создаёт новую Keycloak сессию и требует email код,
+                # что приводит к бесконечному циклу, если get_me_info нестабилен.
+                try:
+                    user_by_id = await db.get_user_by_id(tgID)
+                    saved_fio = user_by_id.get("fio") if user_by_id else None
+                    if saved_fio:
+                        logger.info(
+                            f"get_me_info failed for {tgID}, using saved FIO "
+                            f"to avoid re-auth email code loop"
+                        )
+                        return saved_fio
+                except Exception:
+                    pass
 
-        # Если дошли сюда — куки отсутствуют или не работают
+        # Если дошли сюда — куки отсутствуют или не работают (и нет сохранённого FIO)
         # Проверяем, есть ли уже активная email code сессия (предотвращаем спам)
         await _check_existing_email_session(db, tgID, source="refresh", notify=notify_on_2fa)
 

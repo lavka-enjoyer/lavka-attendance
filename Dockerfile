@@ -52,8 +52,10 @@ RUN chmod +x /app/start.sh
 # Создаём непривилегированного пользователя
 RUN addgroup --system appgroup && adduser --system --ingroup appgroup appuser
 
-# Создаём директорию для логов с правильными правами
-RUN mkdir -p /app/marking_logs && chown -R appuser:appgroup /app/marking_logs
+# Даём appuser доступ к файлам приложения и логам
+RUN chown -R appuser:appgroup /app/backend/ /app/static/ /app/.venv/ \
+    && mkdir -p /app/marking_logs && chown -R appuser:appgroup /app/marking_logs \
+    && touch /app/user_actions.log && chown appuser:appgroup /app/user_actions.log
 
 # Переключаемся на непривилегированного пользователя
 USER appuser

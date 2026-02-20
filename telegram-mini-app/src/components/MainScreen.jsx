@@ -193,7 +193,7 @@ const MainScreen = ({ initData, userData, onMarkMultiple, onUpdateUserData, onVi
         <motion.div variants={itemVariants} className="flex justify-between items-start">
             <div>
                 <h1 className="text-2xl font-bold tracking-tight text-[var(--text-color)]">
-                    Привет, {userData?.FIO?.split(' ')[0] || 'Студент'}! 👋
+                    Привет, {userData?.FIO?.split(' ')[1] || 'Студент'}! 👋
                 </h1>
                 <p className="text-sm opacity-70 text-[var(--hint-color)]">
                     {userData?.group || 'Группа не определена'}

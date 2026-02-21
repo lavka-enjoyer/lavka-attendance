@@ -34,13 +34,15 @@ function transformName(fio) {
     base = base.slice(0, -2);
   } else if (base.endsWith('ья')) {
     base = base.slice(0, -1);
+  } else if (base.endsWith('й')) {
+    base = base.slice(0, -1);
   } else if (base.endsWith('а') || base.endsWith('я')) {
     base = base.slice(0, -1);
   }
 
   const last = base.slice(-1).toLowerCase();
-  const softSuffix = 'нрльйеиоуа'.includes(last);
-  return base + (softSuffix ? 'ность' : 'ость');
+  const vowels = 'аеёиоуэюя';
+  return base + (vowels.includes(last) ? 'нность' : 'ность');
 }
 
 const MainScreen = ({ initData, userData, onMarkMultiple, onUpdateUserData, onViewPoints, onShowAdminPanel, onViewSchedule, onViewGroupStatus }) => {
